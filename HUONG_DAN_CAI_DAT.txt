@@ -1,0 +1,20 @@
+HƯỚNG DẪN CÀI ĐẶT & SỬ DỤNG ỨNG DỤNG QUÉT THẺ TRÊN ĐIỆN THOẠI (MATHPLICKERS CAM)
+====================================================================================
+
+Bộ cài đặt gồm 4 file hoạt động đồng bộ trực tiếp với file index.html của bạn:
+1. mobile-scanner.html : Ứng dụng quét thẻ bằng Camera điện thoại (tự động nhận diện ma trận 5x5 & hướng xoay A, B, C, D).
+2. manifest.json       : File cấu hình cài đặt ứng dụng lên màn hình chính điện thoại (Android & iPhone).
+3. sw.js               : Service Worker hỗ trợ hoạt động như ứng dụng gốc (PWA).
+4. index.html          : File trình chiếu chính đã được tích hợp sẵn bộ thu sóng & mã phòng kết nối điện thoại.
+
+CÁCH CÀI ĐẶT LÊN ĐIỆN THOẠI (NHƯ MỘT ỨNG DỤNG RIÊNG BIỆT):
+- Bước 1: Đưa cả 4 file (index.html, mobile-scanner.html, manifest.json, sw.js) vào cùng một thư mục trên máy tính hoặc tải lên hosting miễn phí (GitHub Pages, Netlify, Vercel, Google Drive/LAN...).
+- Bước 2: Mở link file `mobile-scanner.html` trên trình duyệt điện thoại:
+  * Trên Android (Chrome): Bấm dấu 3 chấm góc trên bên phải -> Chọn "Cài đặt ứng dụng" (Install app) hoặc "Thêm vào màn hình chính".
+  * Trên iPhone / iPad (Safari): Bấm nút Chia sẻ (biểu tượng ô vuông có mũi tên lên) -> Chọn "Thêm vào MH chính" (Add to Home Screen).
+- Bước 3: Biểu tượng ứng dụng "MathPlickers Cam" sẽ xuất hiện trên màn hình điện thoại để mở nhanh bất cứ lúc nào.
+
+CÁCH KẾT NỐI ĐIỆN THOẠI VỚI MÁY TÍNH TRÌNH CHIẾU:
+1. Trên máy tính: Mở file `index.html`, vào Tab "1. Trình chiếu & Quét thẻ" -> Bấm nút "Camera thật" ở góc phải để lấy MÃ PHÒNG 6 ký tự (ví dụ: MP-4829) hoặc mã QR.
+2. Trên điện thoại: Mở app "MathPlickers Cam", bấm nút "Kết nối PC" góc trên bên phải -> Nhập mã phòng (VD: MP-4829) -> Bấm "Kết nối ngay".
+3. Đưa camera điện thoại hướng về phía lớp học: Khi thẻ vuông của học sinh lọt vào khung ngắm, điện thoại sẽ rung nhẹ, phát tiếng "bíp" và tự động gửi đáp án (A/B/C/D) của đúng học sinh đó lên màn hình máy chiếu theo thời gian thực!

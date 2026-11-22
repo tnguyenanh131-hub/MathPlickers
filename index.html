@@ -88,6 +88,8 @@
             overflow-y: hidden;
         }
     </style>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
 
@@ -316,6 +318,20 @@
 
                 <!-- Vùng Camera thật (Ẩn mặc định, bật khi chọn Camera thật) -->
                 <div id="camera-scanner-panel" class="hidden flex-col bg-slate-900 text-white p-3 border-b border-slate-700">
+                                        <!-- Hộp kết nối Camera Điện thoại từ xa (Mobile Companion Sync) -->
+                    <div class="mb-2.5 bg-indigo-950/90 border border-blue-500/40 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                            <div class="text-[11px] font-bold text-blue-300 flex items-center gap-1.5">
+                                <i class="fa-solid fa-mobile-screen-button"></i>
+                                <span>Quét bằng Camera Điện thoại</span>
+                            </div>
+                            <div class="text-[11px] text-slate-300 mt-0.5">
+                                Mã phòng kết nối: <b id="host-room-code" class="text-amber-300 tracking-wider text-xs select-all">Đang tạo...</b>
+                            </div>
+                            <div id="mobile-conn-badge" class="text-[10px] text-slate-400 mt-0.5">Chờ điện thoại kết nối...</div>
+                        </div>
+                        <div id="host-qr-box" class="w-14 h-14 bg-white p-1 rounded-lg shrink-0 flex items-center justify-center"></div>
+                    </div>
                     <div class="relative w-full aspect-video bg-black rounded-xl overflow-hidden border border-slate-700 flex items-center justify-center">
                         <video id="scanner-video" autoplay playsinline class="w-full h-full object-cover"></video>
                         <div class="scanner-laser"></div>
@@ -2524,6 +2540,109 @@
             updateBadges();
             renderLiveClassroom();
         });
+
+        /**
+         * 11. BỘ THU ĐỒNG BỘ CAMERA ĐIỆN THOẠI (MOBILE COMPANION RECEIVER)
+         */
+        let hostPeer = null;
+        let mobileConnections = [];
+        const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('mathplickers_sync') : null;
+
+        function initMobileCompanionHost() {
+            const randomDigits = Math.floor(1000 + Math.random() * 9000);
+            const roomCode = `MP-${randomDigits}`;
+            const codeEl = document.getElementById('host-room-code');
+            if (codeEl) codeEl.textContent = roomCode;
+
+            // Tạo mã QR trỏ tới mobile-scanner.html?room=MP-XXXX (nếu host trên web/LAN)
+            const qrBox = document.getElementById('host-qr-box');
+            if (qrBox && typeof QRCode !== 'undefined') {
+                qrBox.innerHTML = '';
+                const baseUrl = window.location.href.replace(/[^/]*$/, 'mobile-scanner.html');
+                const connectUrl = baseUrl.startsWith('http') ? `${baseUrl}?room=${roomCode}` : roomCode;
+                new QRCode(qrBox, {
+                    text: connectUrl,
+                    width: 48,
+                    height: 48,
+                    correctLevel: QRCode.CorrectLevel.L
+                });
+            }
+
+            if (typeof Peer !== 'undefined') {
+                hostPeer = new Peer(roomCode);
+                hostPeer.on('connection', (conn) => {
+                    mobileConnections.push(conn);
+                    const badge = document.getElementById('mobile-conn-badge');
+                    if (badge) {
+                        badge.innerHTML = `<span class="text-emerald-400 font-bold"><i class="fa-solid fa-circle-check mr-1"></i>Đã nối ${mobileConnections.length} điện thoại</span>`;
+                    }
+                    showToast('Điện thoại quét thẻ đã kết nối thành công!', 'success');
+
+                    conn.on('open', () => broadcastStateToMobiles());
+                    conn.on('data', (data) => handleIncomingMobileScan(data));
+                });
+            }
+
+            if (syncChannel) {
+                syncChannel.onmessage = (e) => handleIncomingMobileScan(e.data);
+            }
+            window.addEventListener('storage', (e) => {
+                if (e.key === 'mathplickers_remote_scan' && e.newValue) {
+                    try {
+                        handleIncomingMobileScan(JSON.parse(e.newValue));
+                    } catch (err) {}
+                }
+            });
+        }
+
+        function broadcastStateToMobiles() {
+            const qLabel = `Câu ${currentLiveIndex + 1}/${questions.length}`;
+            const statePayload = {
+                type: 'HOST_STATE',
+                questionLabel: qLabel,
+                students: students.map(s => ({ cardNumber: s.cardNumber, name: s.name }))
+            };
+            mobileConnections.forEach(c => {
+                if (c.open) c.send(statePayload);
+            });
+            if (syncChannel) syncChannel.postMessage(statePayload);
+        }
+
+        function handleIncomingMobileScan(data) {
+            if (!data) return;
+            if (data.type === 'REQUEST_STATE') {
+                broadcastStateToMobiles();
+                return;
+            }
+            if (data.type === 'PLICKERS_SCAN') {
+                const cardNum = parseInt(data.cardNumber, 10);
+                const opt = data.option;
+                const st = students.find(s => s.cardNumber === cardNum);
+                if (st && ['A', 'B', 'C', 'D'].includes(opt)) {
+                    const currentQ = questions[currentLiveIndex];
+                    if (currentQ) {
+                        if (!responses[currentQ.id]) responses[currentQ.id] = {};
+                        responses[currentQ.id][st.id] = opt;
+                        saveAppState();
+                        renderLiveStudentScannerList();
+                        updateLiveStatsChart();
+                        showToast(`📱 Điện thoại quét thẻ #${cardNum} (${st.name}): Đáp án ${opt}`, 'success');
+                    }
+                }
+            }
+        }
+
+        // Hook vào renderLiveClassroom để tự động đồng bộ câu hỏi sang điện thoại khi giáo viên chuyển câu
+        const _origRenderLive = renderLiveClassroom;
+        renderLiveClassroom = function() {
+            _origRenderLive();
+            broadcastStateToMobiles();
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMobileCompanionHost();
+        });
+
     </script>
 </body>
 </html>
