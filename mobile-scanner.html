@@ -365,8 +365,19 @@
         /**
          * 3. ĐỒNG BỘ DỮ LIỆU VỚI FILE index.html (QUA PEERJS WEBRTC + BROADCASTCHANNEL + LOCALSTORAGE)
          */
+        const PEER_CONFIG = {
+            debug: 1,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            }
+        };
+
         let peer = null;
         let hostConn = null;
+        let connectTimeoutTimer = null;
         const bc = ('BroadcastChannel' in window) ? new BroadcastChannel('mathplickers_sync') : null;
 
         function populateStudentDropdown(list = []) {
@@ -396,18 +407,14 @@
                 timestamp: Date.now()
             };
 
-            // 1. Gửi qua PeerJS tới máy tính đang mở index.html
             if (hostConn && hostConn.open) {
                 hostConn.send(payload);
             }
-
-            // 2. Gửi qua BroadcastChannel / LocalStorage (nếu chạy cùng máy hoặc cùng trình duyệt)
             if (bc) bc.postMessage(payload);
             try {
                 localStorage.setItem('mathplickers_remote_scan', JSON.stringify(payload));
             } catch (e) {}
 
-            // Cập nhật UI trên điện thoại
             totalScannedSession++;
             document.getElementById('scanned-badge').textContent = `Đã quét: ${totalScannedSession}`;
 
@@ -428,13 +435,13 @@
             bar.prepend(tag);
         }
 
-        // Kết nối PeerJS tới mã phòng trên máy tính
         function openPairModal() {
             const modal = document.getElementById('pair-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             const savedRoom = localStorage.getItem('mathplickers_last_room');
             if (savedRoom) document.getElementById('room-code-input').value = savedRoom;
+            setTimeout(() => document.getElementById('room-code-input').focus(), 100);
         }
 
         function closePairModal() {
@@ -444,22 +451,44 @@
         }
 
         function connectToHostRoom() {
-            const rawCode = document.getElementById('room-code-input').value.trim().toUpperCase();
-            if (!rawCode) return;
-            const roomId = rawCode.startsWith('MP-') ? rawCode : `MP-${rawCode}`;
-            localStorage.setItem('mathplickers_last_room', roomId);
+            const rawInput = document.getElementById('room-code-input').value.trim().toUpperCase();
+            if (!rawInput) {
+                alert('Vui lòng nhập mã phòng hiển thị trên máy tính (ví dụ: MP-4829)!');
+                return;
+            }
+            if (typeof Peer === 'undefined') {
+                alert('Không tải được thư viện kết nối PeerJS. Vui lòng kiểm tra kết nối Internet và tải lại trang!');
+                return;
+            }
 
-            updateConnStatus('connecting', `Đang kết nối ${roomId}...`);
+            const cleanCode = rawInput.replace(/[^A-Z0-9-]/g, '');
+            const displayRoomCode = cleanCode.startsWith('MP-') ? cleanCode : `MP-${cleanCode}`;
+            const targetPeerId = `MATHPLICKERS-VN-${displayRoomCode}`;
+
+            localStorage.setItem('mathplickers_last_room', displayRoomCode);
             closePairModal();
+            updateConnStatus('connecting', `Đang kết nối ${displayRoomCode}...`);
 
-            if (peer) peer.destroy();
-            peer = new Peer();
+            if (connectTimeoutTimer) clearTimeout(connectTimeoutTimer);
+            if (peer) {
+                try { peer.destroy(); } catch (e) {}
+                peer = null;
+            }
+
+            peer = new Peer(PEER_CONFIG);
+
+            connectTimeoutTimer = setTimeout(() => {
+                if (!hostConn || !hostConn.open) {
+                    updateConnStatus('disconnected', `Quá hạn kết nối (${displayRoomCode})`);
+                }
+            }, 12000);
 
             peer.on('open', () => {
-                hostConn = peer.connect(roomId, { reliable: true });
+                hostConn = peer.connect(targetPeerId, { reliable: true });
                 hostConn.on('open', () => {
-                    updateConnStatus('connected', `Đã nối máy chiếu (${roomId})`);
-                    document.getElementById('pair-btn-label').textContent = roomId;
+                    clearTimeout(connectTimeoutTimer);
+                    updateConnStatus('connected', `Đã nối máy chiếu (${displayRoomCode})`);
+                    document.getElementById('pair-btn-label').textContent = displayRoomCode;
                     hostConn.send({ type: 'REQUEST_STATE' });
                 });
                 hostConn.on('data', (msg) => {
@@ -476,10 +505,18 @@
                 hostConn.on('close', () => {
                     updateConnStatus('disconnected', 'Mất kết nối máy chiếu');
                 });
+                hostConn.on('error', () => {
+                    clearTimeout(connectTimeoutTimer);
+                    updateConnStatus('disconnected', 'Lỗi truyền dữ liệu tới PC');
+                });
             });
 
-            peer.on('error', () => {
-                updateConnStatus('disconnected', 'Không tìm thấy mã phòng');
+            peer.on('error', (err) => {
+                clearTimeout(connectTimeoutTimer);
+                const msg = err && err.type === 'peer-unavailable'
+                    ? `Không tìm thấy phòng ${displayRoomCode}`
+                    : 'Lỗi kết nối máy chủ PeerJS';
+                updateConnStatus('disconnected', msg);
             });
         }
 

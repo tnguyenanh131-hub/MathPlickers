@@ -90,6 +90,8 @@
     </style>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
 
@@ -133,6 +135,10 @@
                 </button>
                 <button onclick="switchTab('reports')" id="nav-reports" class="nav-btn flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-semibold text-indigo-200 hover:text-white hover:bg-indigo-800/60 transition-all">
                     <i class="fa-solid fa-chart-column"></i>
+                    <span class="hidden md:inline">4. Báo cáo</span>
+                    <span class="md:hidden">Báo cáo</span>
+                </button>
+            </nav>
             <!-- Thông tin lớp hiện tại & Bộ chuyển đổi nhanh -->
             <div class="flex items-center gap-2 text-sm">
                 <div class="flex flex-col">
@@ -405,6 +411,12 @@
                             <span>Nhập file (.json / .csv)</span>
                             <input type="file" id="import-questions-input" accept=".json,.csv,.txt" class="hidden" onchange="handleImportQuestions(event)">
                         </label>
+
+                        <!-- Nút Nhập File Đề Word (.docx) bằng AI -->
+                        <button type="button" onclick="openWordAiModal()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs sm:text-sm font-bold shadow-sm flex items-center gap-1.5 transition">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span>Nhập đề Word (.docx) AI</span>
+                        </button>
 
                         <!-- Nút Xuất File Ngân hàng câu hỏi -->
                         <button onclick="exportQuestionsJSON()" class="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-semibold flex items-center gap-1.5 transition">
@@ -815,7 +827,7 @@
                         <i class="fa-solid fa-cloud-arrow-up text-3xl text-blue-500 mb-2"></i>
                         <span class="text-sm font-bold text-slate-800">Nhấn để chọn file hoặc kéo thả file danh sách lớp vào đây</span>
                         <span class="text-xs text-slate-500 mt-1">Hỗ trợ <b>.CSV</b> (cột Họ tên hoặc STT, Họ tên), <b>.TXT</b> (mỗi dòng 1 tên), <b>.JSON</b></span>
-                        <input type="file" id="import-class-file-input" accept=".csv,.json,.txt" class="hidden" onchange="handleClassFileSelect(event)">
+                        <input type="file" id="import-class-file-input" accept=".xlsx,.xls,.csv,.json,.txt" class="hidden" onchange="handleClassFileSelect(event)">
                     </label>
 
                     <!-- Hoặc nhập nhanh danh sách thủ công -->
@@ -903,11 +915,114 @@
     <!-- ===================================================================== -->
     <!-- MÃ NGUỒN JAVASCRIPT ĐIỀU KHIỂN TOÀN BỘ ỨNG DỤNG                       -->
     <!-- ===================================================================== -->
+    <!-- ===================================================================== -->
+    <!-- MODAL NHẬP ĐỀ WORD (.DOCX) & CHUẨN HÓA BẰNG AI                        -->
+    <!-- ===================================================================== -->
+    <div id="word-ai-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden">
+            <div class="px-6 py-4 bg-gradient-to-r from-indigo-950 to-purple-900 text-white flex items-center justify-between">
+                <div class="flex items-center gap-2.5">
+                    <i class="fa-solid fa-file-word text-blue-300 text-xl"></i>
+                    <h3 class="font-bold text-base sm:text-lg">AI Chuẩn hóa Đề thi Word (.docx)</h3>
+                </div>
+                <button type="button" onclick="closeWordAiModal()" class="text-indigo-200 hover:text-white"><i class="fa-solid fa-xmark text-xl"></i></button>
+            </div>
+            <div class="p-5 space-y-4">
+                <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-950 leading-relaxed">
+                    Tự động giải nén file Word <b>.docx</b>, trích xuất công thức MathType/OMML, hình vẽ nhúng, bảng biểu và bảng biến thiên để AI chuẩn hóa về đề trắc nghiệm chuẩn MathPlickers.
+                </div>
+
+                <div>
+                    <label class="block text-xs font-extrabold uppercase text-slate-700 mb-1">Gemini API Key (Lưu cục bộ trên trình duyệt của bạn)</label>
+                    <input type="password" id="gemini-api-key-input" placeholder="Dán Gemini API Key (AIzaSy...)..." class="w-full border border-slate-300 rounded-xl px-3.5 py-2 text-sm font-mono">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-extrabold uppercase text-slate-700 mb-1">Chọn file đề Word (.docx)</label>
+                    <input type="file" id="word-docx-file-input" accept=".docx" class="w-full border border-slate-300 rounded-xl p-2 text-sm bg-slate-50">
+                </div>
+
+                <div id="word-ai-status" class="hidden rounded-xl p-3 text-xs font-semibold bg-slate-100 text-slate-700"></div>
+            </div>
+            <div class="px-6 py-3.5 bg-slate-100 border-t border-slate-200 flex justify-end gap-2">
+                <button type="button" onclick="closeWordAiModal()" class="px-4 py-2 rounded-xl bg-white border border-slate-300 text-sm font-semibold">Đóng</button>
+                <button type="button" id="btn-run-word-ai" onclick="processWordDocxWithAI()" class="px-5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold shadow flex items-center gap-2">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    <span>Phân tích & Nhập vào Ngân hàng</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         /**
          * 1. DỮ LIỆU MẪU CHUẨN SƯ PHẠM TOÁN HỌC (ĐA DẠNG CHUYÊN ĐỀ, ĐỒ THỊ & HÌNH VẼ SVG)
          */
-// ... existing code ... -->
+const DEFAULT_QUESTIONS = [
+            {
+                id: 'q_sample_1',
+                topic: 'Giải tích',
+                text: 'Cho hàm số $y = x^3 - 3x + 1$. Giá trị cực đại của hàm số đã cho bằng:',
+                options: {
+                    A: '$3$',
+                    B: '$-1$',
+                    C: '$1$',
+                    D: '$-3$'
+                },
+                correct: 'A',
+                explanation: 'Ta có $y\' = 3x^2 - 3 = 0 \Leftrightarrow x = \pm 1$. Lập bảng biến thiên suy ra hàm số đạt cực đại tại $x = -1$ và $y_{CĐ} = (-1)^3 - 3(-1) + 1 = 3$.',
+                visualType: 'graph',
+                graphExpr: 'x**3 - 3*x + 1',
+                svgCode: '',
+                visualCaption: 'Đồ thị hàm số y = x³ - 3x + 1'
+            },
+            {
+                id: 'q_sample_2',
+                topic: 'Đại số',
+                text: 'Tập nghiệm của bất phương trình $\log_2(x - 1) < 3$ là:',
+                options: {
+                    A: '$(1; 9)$',
+                    B: '$(-\infty; 9)$',
+                    C: '$(1; 7)$',
+                    D: '$(9; +\infty)$'
+                },
+                correct: 'A',
+                explanation: 'Điều kiện: $x > 1$. Bất phương trình tương đương $x - 1 < 2^3 \Leftrightarrow x < 9$. Kết hợp điều kiện ta được tập nghiệm $S = (1; 9)$.',
+                visualType: 'none',
+                graphExpr: '',
+                svgCode: '',
+                visualCaption: ''
+            },
+            {
+                id: 'q_sample_3',
+                topic: 'Hình học không gian',
+                text: 'Cho hình chóp $S.ABC$ có đáy $ABC$ là tam giác vuông tại $B$, $SA \perp (ABC)$, $SA = a$, $AB = a$, $BC = a\sqrt{3}$. Thể tích khối chóp $S.ABC$ bằng:',
+                options: {
+                    A: '$\frac{a^3\sqrt{3}}{6}$',
+                    B: '$\frac{a^3\sqrt{3}}{2}$',
+                    C: '$\frac{a^3}{3}$',
+                    D: '$a^3\sqrt{3}$'
+                },
+                correct: 'A',
+                explanation: 'Diện tích đáy $S_{\triangle ABC} = \frac{1}{2}AB\cdot BC = \frac{a^2\sqrt{3}}{2}$. Thể tích $V = \frac{1}{3}SA\cdot S_{\triangle ABC} = \frac{a^3\sqrt{3}}{6}$.',
+                visualType: 'svg',
+                graphExpr: '',
+                svgCode: `<svg viewBox="0 0 260 190" class="w-60 h-44"><polygon points="60,30 35,145 140,170 225,135" fill="none" stroke="#1e293b" stroke-width="2"/><line x1="60" y1="30" x2="140" y2="170" stroke="#1e293b" stroke-width="2"/><line x1="35" y1="145" x2="225" y2="135" stroke="#475569" stroke-width="1.5" stroke-dasharray="5,5"/><line x1="60" y1="30" x2="35" y2="145" stroke="#2563eb" stroke-width="2.5"/><text x="52" y="22" font-size="14" font-weight="bold">S</text><text x="18" y="150" font-size="14" font-weight="bold">A</text><text x="136" y="186" font-size="14" font-weight="bold">B</text><text x="230" y="140" font-size="14" font-weight="bold">C</text></svg>`,
+                visualCaption: 'Hình minh họa khối chóp S.ABC'
+            }
+        ];
+
+        const DEFAULT_STUDENTS = [
+            { id: 'st_1', cardNumber: 1, name: 'Nguyễn Minh Anh' },
+            { id: 'st_2', cardNumber: 2, name: 'Trần Quốc Bảo' },
+            { id: 'st_3', cardNumber: 3, name: 'Lê Thị Thu Hà' },
+            { id: 'st_4', cardNumber: 4, name: 'Phạm Đức Huy' },
+            { id: 'st_5', cardNumber: 5, name: 'Hoàng Gia Khánh' },
+            { id: 'st_6', cardNumber: 6, name: 'Vũ Ngọc Lan' },
+            { id: 'st_7', cardNumber: 7, name: 'Đặng Tuấn Minh' },
+            { id: 'st_8', cardNumber: 8, name: 'Bùi Phương Thảo' }
+        ];
+
         /**
          * 2. QUẢN LÝ TRẠNG THÁI ĐA LỚP & DỮ LIỆU (MULTI-CLASS STATE & LOCALSTORAGE)
          */
@@ -2133,21 +2248,67 @@
             }
         }
 
-        function processClassFile(file) {
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                const content = e.target.result;
-                const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim();
-                const nameInput = document.getElementById('input-custom-class-name');
+        async function readTextWithAutoEncoding(file) {
+            const buffer = await file.arrayBuffer();
+            const bytes = new Uint8Array(buffer);
 
-                let extractedNames = [];
-                let suggestedClassName = fileNameWithoutExt;
-
+            if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+                return new TextDecoder('utf-16le').decode(buffer);
+            }
+            if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+                return new TextDecoder('utf-16be').decode(buffer);
+            }
+            if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+                return new TextDecoder('utf-8').decode(bytes.slice(3));
+            }
+            try {
+                return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+            } catch (e) {
                 try {
-                    if (file.name.toLowerCase().endsWith('.json')) {
+                    return new TextDecoder('windows-1258').decode(buffer);
+                } catch (e2) {
+                    return new TextDecoder('iso-8859-1').decode(buffer);
+                }
+            }
+        }
+
+        async function processClassFile(file) {
+            const fileNameLower = file.name.toLowerCase();
+            const fileNameWithoutExt = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim();
+            const nameInput = document.getElementById('input-custom-class-name');
+
+            let extractedNames = [];
+            let suggestedClassName = fileNameWithoutExt;
+
+            try {
+                if ((fileNameLower.endsWith('.xlsx') || fileNameLower.endsWith('.xls')) && typeof XLSX !== 'undefined') {
+                    const data = await file.arrayBuffer();
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' });
+
+                    rows.forEach((row, idx) => {
+                        const cols = row.map(c => String(c || '').trim()).filter(Boolean);
+                        if (cols.length === 0) return;
+                        const firstLower = cols[0].toLowerCase();
+                        const secondLower = cols[1] ? cols[1].toLowerCase() : '';
+                        if (idx === 0 && (
+                            ['stt', 'họ tên', 'họ và tên', 'name'].includes(firstLower) ||
+                            ['họ tên', 'họ và tên'].includes(secondLower)
+                        )) {
+                            return;
+                        }
+                        if (cols.length >= 2 && /^\d+$/.test(cols[0])) {
+                            extractedNames.push(cols[1]);
+                        } else {
+                            extractedNames.push(cols[0]);
+                        }
+                    });
+                } else {
+                    const content = await readTextWithAutoEncoding(file);
+                    if (fileNameLower.endsWith('.json')) {
                         const parsed = JSON.parse(content);
                         if (Array.isArray(parsed)) {
-                            // Mảng chuỗi ["Nguyễn Văn A", ...] hoặc mảng đối tượng [{ name: "..." }]
                             parsed.forEach(item => {
                                 if (typeof item === 'string' && item.trim()) {
                                     extractedNames.push(item.trim());
@@ -2157,7 +2318,6 @@
                                 }
                             });
                         } else if (parsed && typeof parsed === 'object') {
-                            // Đối tượng { className: "...", students: [...] }
                             if (parsed.className || parsed.tenLop || parsed.name) {
                                 suggestedClassName = String(parsed.className || parsed.tenLop || parsed.name).trim();
                             }
@@ -2174,14 +2334,11 @@
                             }
                         }
                     } else {
-                        // Hỗ trợ .CSV và .TXT
                         const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
                         lines.forEach((line, idx) => {
-                            // Tách cột theo dấu phẩy hoặc chấm phẩy
                             const cols = line.split(/[,;\t]/).map(c => c.replace(/^["']|["']$/g, '').trim()).filter(Boolean);
                             if (cols.length === 0) return;
 
-                            // Bỏ qua dòng tiêu đề phổ biến
                             const firstLower = cols[0].toLowerCase();
                             const secondLower = cols[1] ? cols[1].toLowerCase() : '';
                             if (idx === 0 && (
@@ -2195,7 +2352,6 @@
                                 return;
                             }
 
-                            // Nếu cột đầu là số thứ tự (VD: "1", "01") thì lấy cột thứ 2 làm tên học sinh
                             if (cols.length >= 2 && /^\d+$/.test(cols[0])) {
                                 extractedNames.push(cols[1]);
                             } else {
@@ -2203,31 +2359,29 @@
                             }
                         });
                     }
-
-                    // Tự động điền tên lớp gợi ý nếu ô nhập tên lớp đang trống
-                    if (!nameInput.value.trim() && suggestedClassName) {
-                        nameInput.value = suggestedClassName;
-                    }
-
-                    if (extractedNames.length === 0) {
-                        showToast('Không tìm thấy tên học sinh hợp lệ trong file. Hãy kiểm tra định dạng file mẫu!', 'error');
-                        return;
-                    }
-
-                    pendingClassStudents = extractedNames.map((studentName, index) => ({
-                        id: `st_${Date.now()}_${index}`,
-                        cardNumber: index + 1,
-                        name: studentName
-                    }));
-
-                    renderPendingClassStudentsPreview();
-                    showToast(`Đã đọc thành công ${pendingClassStudents.length} học sinh từ file "${file.name}"!`, 'success');
-                } catch (err) {
-                    console.error(err);
-                    showToast('Lỗi đọc file! Vui lòng kiểm tra lại cấu trúc file CSV, JSON hoặc TXT.', 'error');
                 }
-            };
-            reader.readAsText(file, 'UTF-8');
+
+                if (!nameInput.value.trim() && suggestedClassName) {
+                    nameInput.value = suggestedClassName;
+                }
+
+                if (extractedNames.length === 0) {
+                    showToast('Không tìm thấy tên học sinh hợp lệ trong file. Hãy kiểm tra định dạng file mẫu!', 'error');
+                    return;
+                }
+
+                pendingClassStudents = extractedNames.map((studentName, index) => ({
+                    id: `st_${Date.now()}_${index}`,
+                    cardNumber: index + 1,
+                    name: studentName.normalize('NFC')
+                }));
+
+                renderPendingClassStudentsPreview();
+                showToast(`Đã đọc chuẩn tiếng Việt ${pendingClassStudents.length} học sinh từ file "${file.name}"!`, 'success');
+            } catch (err) {
+                console.error(err);
+                showToast('Lỗi đọc file! Vui lòng kiểm tra lại cấu trúc file Excel, CSV, JSON hoặc TXT.', 'error');
+            }
         }
 
         function parseManualPastedStudents() {
@@ -2551,10 +2705,10 @@
         function initMobileCompanionHost() {
             const randomDigits = Math.floor(1000 + Math.random() * 9000);
             const roomCode = `MP-${randomDigits}`;
+            const fullPeerId = `MATHPLICKERS-VN-${roomCode}`;
             const codeEl = document.getElementById('host-room-code');
             if (codeEl) codeEl.textContent = roomCode;
 
-            // Tạo mã QR trỏ tới mobile-scanner.html?room=MP-XXXX (nếu host trên web/LAN)
             const qrBox = document.getElementById('host-qr-box');
             if (qrBox && typeof QRCode !== 'undefined') {
                 qrBox.innerHTML = '';
@@ -2569,7 +2723,15 @@
             }
 
             if (typeof Peer !== 'undefined') {
-                hostPeer = new Peer(roomCode);
+                hostPeer = new Peer(fullPeerId, {
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                });
                 hostPeer.on('connection', (conn) => {
                     mobileConnections.push(conn);
                     const badge = document.getElementById('mobile-conn-badge');
@@ -2580,6 +2742,9 @@
 
                     conn.on('open', () => broadcastStateToMobiles());
                     conn.on('data', (data) => handleIncomingMobileScan(data));
+                });
+                hostPeer.on('error', (err) => {
+                    console.warn('Host PeerJS warning:', err);
                 });
             }
 
@@ -2643,6 +2808,163 @@
             initMobileCompanionHost();
         });
 
+
+        /**
+         * 12. NHẬP FILE ĐỀ WORD (.DOCX) & TỰ ĐỘNG CHUẨN HÓA BẰNG AI
+         */
+        function openWordAiModal() {
+            const modal = document.getElementById('word-ai-modal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            const savedKey = localStorage.getItem('mathplickers_gemini_key');
+            if (savedKey) document.getElementById('gemini-api-key-input').value = savedKey;
+            document.getElementById('word-ai-status').classList.add('hidden');
+        }
+
+        function closeWordAiModal() {
+            const modal = document.getElementById('word-ai-modal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        async function processWordDocxWithAI() {
+            const apiKey = document.getElementById('gemini-api-key-input').value.trim();
+            const fileInput = document.getElementById('word-docx-file-input');
+            const statusBox = document.getElementById('word-ai-status');
+            const runBtn = document.getElementById('btn-run-word-ai');
+
+            if (!apiKey) {
+                showToast('Vui lòng nhập Gemini API Key!', 'error');
+                return;
+            }
+            if (!fileInput.files || fileInput.files.length === 0) {
+                showToast('Vui lòng chọn file đề Word (.docx)!', 'error');
+                return;
+            }
+            if (typeof JSZip === 'undefined') {
+                showToast('Chưa tải được thư viện JSZip. Vui lòng kiểm tra kết nối Internet!', 'error');
+                return;
+            }
+
+            localStorage.setItem('mathplickers_gemini_key', apiKey);
+            const file = fileInput.files[0];
+
+            runBtn.disabled = true;
+            statusBox.classList.remove('hidden');
+            statusBox.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5 text-purple-600"></i> Đang giải nén .docx, trích xuất công thức OMML, bảng biến thiên & hình vẽ...';
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const zip = await JSZip.loadAsync(arrayBuffer);
+
+                const docXmlFile = zip.file('word/document.xml');
+                if (!docXmlFile) throw new Error('File .docx không hợp lệ (thiếu word/document.xml)');
+                const docXml = await docXmlFile.async('text');
+
+                const mediaImages = [];
+                const mediaKeys = Object.keys(zip.files).filter(k => k.startsWith('word/media/') && !zip.files[k].dir);
+                for (let i = 0; i < Math.min(mediaKeys.length, 15); i++) {
+                    const key = mediaKeys[i];
+                    const ext = key.split('.').pop().toLowerCase();
+                    const mime = ext === 'png' ? 'image/png' : (ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : null);
+                    if (mime) {
+                        const base64Data = await zip.file(key).async('base64');
+                        mediaImages.push({
+                            name: key.split('/').pop(),
+                            mimeType: mime,
+                            base64: base64Data,
+                            dataUrl: `data:${mime};base64,${base64Data}`
+                        });
+                    }
+                }
+
+                statusBox.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles fa-bounce mr-1.5 text-purple-600"></i> Đang gửi nội dung đề & ${mediaImages.length} hình vẽ cho AI chuẩn hóa...`;
+
+                const systemPrompt = `Bạn là chuyên gia số hóa đề thi Toán học sang chuẩn JSON cho phần mềm MathPlickers.
+Nhiệm vụ: Phân tích XML của file Word (.docx) và các hình ảnh đính kèm để trích xuất toàn bộ câu hỏi trắc nghiệm 4 lựa chọn (A, B, C, D).
+Yêu cầu bắt buộc:
+1. Toàn bộ công thức toán học (từ <m:oMath> hoặc ký hiệu toán) phải chuyển sang chuẩn LaTeX đặt trong cặp dấu $ ... $ (inline) hoặc $$ ... $$ (display).
+2. Nếu câu hỏi có Bảng biểu hoặc Bảng biến thiên (từ <w:tbl> hoặc hình ảnh), hãy dựng lại thành mã HTML Table hoặc SVG chuẩn xác vào trường "svgCode" và đặt "visualType": "svg".
+3. Nếu câu hỏi có Hình vẽ hình học hoặc Đồ thị từ ảnh đính kèm, hãy dựng thành mã <svg viewBox="0 0 300 220">...</svg> rõ nét (hoặc nhúng thẻ <img src="IMG_INDEX_0" class="max-h-52 mx-auto"/> tương ứng thứ tự ảnh) vào "svgCode" với "visualType": "svg".
+4. Trả về DUY NHẤT một mảng JSON hợp lệ (không bọc markdown), mỗi phần tử có cấu trúc:
+{
+  "topic": "Giải tích | Đại số | Hình học phẳng | Hình học không gian",
+  "text": "Nội dung câu hỏi đã chuẩn hóa LaTeX",
+  "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+  "correct": "A",
+  "explanation": "Lời giải chi tiết (nếu có trong đề)",
+  "visualType": "none | svg",
+  "svgCode": "Mã SVG hoặc bảng biến thiên HTML nếu có",
+  "visualCaption": "Chú thích hình/bảng"
+}`;
+
+                const parts = [
+                    { text: `${systemPrompt}\n\nNỘI DUNG XML TRÍCH TỪ FILE WORD:\n${docXml.slice(0, 120000)}` }
+                ];
+                mediaImages.forEach((img, idx) => {
+                    parts.push({ text: `Hình ảnh đính kèm IMG_INDEX_${idx} (${img.name}):` });
+                    parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
+                });
+
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts }],
+                        generationConfig: { temperature: 0.1, responseMimeType: 'application/json' }
+                    })
+                });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(`Gemini API lỗi (${response.status}): ${errText.slice(0, 160)}`);
+                }
+
+                const resultJson = await response.json();
+                const rawOutput = resultJson?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+                const cleanedJson = rawOutput.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+                const parsedQuestions = JSON.parse(cleanedJson);
+
+                if (!Array.isArray(parsedQuestions) || parsedQuestions.length === 0) {
+                    throw new Error('AI không trích xuất được câu hỏi nào từ file Word.');
+                }
+
+                parsedQuestions.forEach((item, idx) => {
+                    let svgHtml = item.svgCode || '';
+                    mediaImages.forEach((img, imgIdx) => {
+                        svgHtml = svgHtml.replaceAll(`IMG_INDEX_${imgIdx}`, img.dataUrl);
+                    });
+
+                    questions.push({
+                        id: `q_docx_${Date.now()}_${idx}`,
+                        topic: item.topic || 'Giải tích',
+                        text: item.text || '',
+                        options: {
+                            A: item.options?.A || '',
+                            B: item.options?.B || '',
+                            C: item.options?.C || '',
+                            D: item.options?.D || ''
+                        },
+                        correct: ['A', 'B', 'C', 'D'].includes(item.correct) ? item.correct : 'A',
+                        explanation: item.explanation || '',
+                        visualType: svgHtml ? 'svg' : 'none',
+                        graphExpr: '',
+                        svgCode: svgHtml,
+                        visualCaption: item.visualCaption || ''
+                    });
+                });
+
+                saveAppState();
+                renderQuestionBank();
+                closeWordAiModal();
+                showToast(`AI đã chuẩn hóa & nhập thành công ${parsedQuestions.length} câu hỏi từ file Word!`, 'success');
+            } catch (err) {
+                console.error(err);
+                statusBox.innerHTML = `<span class="text-rose-600"><i class="fa-solid fa-circle-exclamation mr-1"></i> ${err.message}</span>`;
+            } finally {
+                runBtn.disabled = false;
+            }
+        }
     </script>
 </body>
 </html>

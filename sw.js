@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mathplickers-cam-v1';
+const CACHE_NAME = 'mathplickers-cam-v2';
 const ASSETS = ['./mobile-scanner.html', './manifest.json'];
 
 self.addEventListener('install', (e) => {

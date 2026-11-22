@@ -18,3 +18,9 @@ CÁCH KẾT NỐI ĐIỆN THOẠI VỚI MÁY TÍNH TRÌNH CHIẾU:
 1. Trên máy tính: Mở file `index.html`, vào Tab "1. Trình chiếu & Quét thẻ" -> Bấm nút "Camera thật" ở góc phải để lấy MÃ PHÒNG 6 ký tự (ví dụ: MP-4829) hoặc mã QR.
 2. Trên điện thoại: Mở app "MathPlickers Cam", bấm nút "Kết nối PC" góc trên bên phải -> Nhập mã phòng (VD: MP-4829) -> Bấm "Kết nối ngay".
 3. Đưa camera điện thoại hướng về phía lớp học: Khi thẻ vuông của học sinh lọt vào khung ngắm, điện thoại sẽ rung nhẹ, phát tiếng "bíp" và tự động gửi đáp án (A/B/C/D) của đúng học sinh đó lên màn hình máy chiếu theo thời gian thực!
+
+
+CẬP NHẬT PHIÊN BẢN V2:
+- Sửa lỗi kết nối điện thoại -> máy tính qua nút "Kết nối ngay" (bổ sung STUN server, chống trùng ID phòng và báo lỗi chi tiết).
+- Sửa lỗi font tiếng Việt khi nạp danh sách học sinh (.CSV, .TXT, .XLSX, .XLS, .JSON) nhờ tự động nhận diện bảng mã UTF-8 / UTF-16 / Windows-1258.
+- Bổ sung nút "Nhập đề Word (.docx) AI" trong Tab 2 để AI tự động trích xuất và chuẩn hóa công thức LaTeX, hình vẽ, bảng biểu và bảng biến thiên.
