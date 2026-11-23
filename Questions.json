@@ -1,0 +1,44 @@
+{
+  "deckTitle": "Kiểm tra nhanh Đại số & Giải tích",
+  "questions": [
+    {
+      "id": "Q001",
+      "points": 1,
+      "promptLatex": "Tính đạo hàm của hàm số $y = x^3 - 3x + 2$.",
+      "options": {
+        "A": "$y' = 3x^2 - 3$",
+        "B": "$y' = x^2 - 3$",
+        "C": "$y' = 3x^2 + 2$",
+        "D": "$y' = 3x - 3$"
+      },
+      "correctAnswer": "A",
+      "explanationLatex": "$y' = \\frac{d}{dx}(x^3 - 3x + 2) = 3x^2 - 3$."
+    },
+    {
+      "id": "Q002",
+      "points": 2,
+      "promptLatex": "Tìm nghiệm của phương trình $\\log_2(x - 1) = 3$.",
+      "options": {
+        "A": "$x = 7$",
+        "B": "$x = 9$",
+        "C": "$x = 10$",
+        "D": "$x = 6$"
+      },
+      "correctAnswer": "B",
+      "explanationLatex": "$x - 1 = 2^3 = 8 \\Rightarrow x = 9$ (thỏa mãn $x > 1$)."
+    },
+    {
+      "id": "Q003",
+      "points": 2,
+      "promptLatex": "Giá trị nhỏ nhất của biểu thức $P = x^2 + \\frac{4}{x^2}$ với $x \\neq 0$ là:",
+      "options": {
+        "A": "$2$",
+        "B": "$8$",
+        "C": "$4$",
+        "D": "$0$"
+      },
+      "correctAnswer": "C",
+      "explanationLatex": "Áp dụng bất đẳng thức Cô-si (AM-GM): $x^2 + \\frac{4}{x^2} \\ge 2\\sqrt{x^2 \\cdot \\frac{4}{x^2}} = 4$. Dấu bằng xảy ra khi $x^2 = 2$."
+    }
+  ]
+}

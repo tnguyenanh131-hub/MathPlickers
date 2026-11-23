@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>In bộ thẻ Plickers xoay 4 chiều (1..40 - A/B/C/D)</title>
+  <style>
+    :root { --card-size: 82mm; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f1f5f9; color: #0f172a; margin: 0; padding: 20px; }
+    .toolbar { max-width: 960px; margin: 0 auto 20px auto; background: #ffffff; padding: 16px 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08); display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+    .toolbar-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    input, select, button { padding: 8px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; }
+    button { background: #2563eb; color: #ffffff; border: none; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #0f172a; }
+    .sheet { max-width: 210mm; margin: 0 auto; background: #ffffff; padding: 10mm; display: grid; grid-template-columns: repeat(2, 1fr); gap: 12mm; justify-items: center; box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1); }
+    .card-wrapper { width: var(--card-size); height: var(--card-size); border: 1px dashed #94a3b8; padding: 4mm; background: #ffffff; display: flex; align-items: center; justify-content: center; position: relative; page-break-inside: avoid; }
+    .card-svg { width: 100%; height: 100%; display: block; }
+    .hint-box { max-width: 960px; margin: 0 auto 16px auto; background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px 16px; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+    @media print {
+      body { background: #ffffff; padding: 0; }
+      .toolbar, .hint-box { display: none !important; }
+      .sheet { box-shadow: none; padding: 6mm; gap: 8mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div class="toolbar-controls">
+      <label>Từ thẻ số: <input id="startNum" type="number" value="1" min="1" max="40" style="width:72px;" /></label>
+      <label>Số lượng thẻ: <input id="cardCount" type="number" value="6" min="1" max="40" style="width:72px;" /></label>
+      <label>Khổ thẻ:
+        <select id="cardSizeSelect">
+          <option value="82mm" selected>Vừa (82mm - 6 thẻ/A4)</option>
+          <option value="110mm">Lớn (110mm - 2 thẻ/A4)</option>
+          <option value="65mm">Nhỏ (65mm - 9 thẻ/A4)</option>
+        </select>
+      </label>
+      <button id="btnGenerate" class="secondary">Tạo bộ thẻ (1..40)</button>
+    </div>
+    <button onclick="window.print()">In thẻ (PDF / Máy in)</button>
+  </div>
+
+  <div class="hint-box">
+    <strong>Thẻ mã hóa trực tiếp số thẻ 1..40 + xoay 4 chiều A/B/C/D:</strong><br />
+    1. Khối thanh đen phía trên (cạnh <strong>A</strong>) tạo trọng tâm lệch 4 hướng (<strong>0° = A, 90° = B, 180° = C, 270° = D</strong>).<br />
+    2. Hàng 6 ô mã hóa ở giữa thẻ biểu diễn số thứ tự <strong>1..40</strong> theo 6-bit nhị phân (ô đen = 1, ô trắng = 0) để <code>scanner.js</code> tự đọc đúng số thẻ của từng học sinh.
+  </div>
+
+  <main class="sheet" id="cardSheet"></main>
+
+  <script>
+    function buildCardSvg(cardNumber) {
+      const clampedNum = Math.min(40, Math.max(1, parseInt(cardNumber, 10) || 1));
+      const paddedId = String(clampedNum).padStart(2, "0");
+
+      const bitCoords = [
+        { x: 30, y: 90, w: 18, h: 22 },
+        { x: 54, y: 90, w: 18, h: 22 },
+        { x: 78, y: 90, w: 18, h: 22 },
+        { x: 104, y: 90, w: 18, h: 22 },
+        { x: 128, y: 90, w: 18, h: 22 },
+        { x: 152, y: 90, w: 18, h: 22 }
+      ];
+
+      const bitRectsHtml = bitCoords
+        .map((b, idx) => {
+          const isOne = ((clampedNum >> idx) & 1) === 1;
+          const fill = isOne ? "#000000" : "#ffffff";
+          return `<rect x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" fill="${fill}" stroke="#000000" stroke-width="2" />`;
+        })
+        .join("\n          ");
+
+      return `
+        <svg class="card-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0" y="0" width="200" height="200" fill="#ffffff" />
+          <rect x="20" y="20" width="10" height="10" fill="#000000" />
+          <rect x="170" y="20" width="10" height="10" fill="#000000" />
+          <rect x="20" y="170" width="10" height="10" fill="#000000" />
+          <rect x="170" y="170" width="10" height="10" fill="#000000" />
+
+          <rect x="52" y="28" width="96" height="26" fill="#000000" />
+          <rect x="68" y="54" width="64" height="14" fill="#000000" />
+
+          ${bitRectsHtml}
+
+          <text x="100" y="14" text-anchor="middle" font-size="13" font-weight="700" fill="#64748b">A</text>
+          <text x="188" y="104" text-anchor="middle" font-size="13" font-weight="700" fill="#64748b" transform="rotate(90 188 100)">B</text>
+          <text x="100" y="194" text-anchor="middle" font-size="13" font-weight="700" fill="#64748b" transform="rotate(180 100 188)">C</text>
+          <text x="12" y="104" text-anchor="middle" font-size="13" font-weight="700" fill="#64748b" transform="rotate(-90 12 100)">D</text>
+          <text x="100" y="144" text-anchor="middle" font-size="14" font-weight="700" fill="#475569">#${paddedId}</text>
+        </svg>
+      `;
+    }
+
+    function renderCards() {
+      const start = Math.min(40, Math.max(1, parseInt(document.getElementById("startNum").value, 10) || 1));
+      const count = Math.min(40, Math.max(1, parseInt(document.getElementById("cardCount").value, 10) || 6));
+      const size = document.getElementById("cardSizeSelect").value;
+
+      document.documentElement.style.setProperty("--card-size", size);
+      const sheet = document.getElementById("cardSheet");
+      sheet.innerHTML = "";
+
+      for (let i = 0; i < count; i++) {
+        const cardNum = ((start - 1 + i) % 40) + 1;
+        const div = document.createElement("div");
+        div.className = "card-wrapper";
+        div.innerHTML = buildCardSvg(cardNum);
+        sheet.appendChild(div);
+      }
+    }
+
+    document.getElementById("btnGenerate").addEventListener("click", renderCards);
+    document.getElementById("cardSizeSelect").addEventListener("change", renderCards);
+    window.addEventListener("DOMContentLoaded", renderCards);
+  </script>
+</body>
+</html>

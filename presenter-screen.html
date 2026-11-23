@@ -1,0 +1,1014 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Presenter Screen - Plickers Math Suite</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #020617; color: #f8fafc; margin: 0; padding: 20px; }
+    .topbar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; background: #0f172a; padding: 14px 18px; border-radius: 14px; border: 1px solid #1e293b; margin-bottom: 18px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    button, select, input { padding: 8px 12px; border-radius: 8px; border: 1px solid #334155; background: #1e293b; color: #f8fafc; font-size: 14px; }
+    button { background: #2563eb; border: none; font-weight: 600; cursor: pointer; }
+    button.secondary { background: #1e293b; border: 1px solid #475569; }
+    .layout { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+    @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+    .panel { background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 18px; }
+    .option-card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 12px 14px; margin-top: 10px; }
+    .timer-banner { display: flex; justify-content: space-between; align-items: center; background: #1e293b; padding: 10px 14px; border-radius: 10px; margin-bottom: 14px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <strong id="deckTitleDisplay">Kiểm tra nhanh Đại số &amp; Giải tích</strong>
+      <span id="wsBadge" style="margin-left:10px; font-size:12px; color:#94a3b8;">WS: Đang kết nối...</span>
+    </div>
+    <div class="controls">
+      <button class="secondary" id="btnPrevQ">◀ Câu trước</button>
+      <select id="questionSelect"></select>
+      <button class="secondary" id="btnNextQ">Câu sau ▶</button>
+      <button class="secondary" id="btnStartPauseTimer">Bắt đầu đếm ngược</button>
+      <button class="secondary" id="btnToggleSound">Âm thanh: BẬT</button>
+      <button class="secondary" id="btnToggleLeaderboard">Bảng điểm &amp; Xếp hạng</button>
+      <button class="secondary" id="btnExportCsv">Xuất CSV</button>
+      <button class="secondary" id="btnToggleQrModal">Mã QR điện thoại</button>
+      <button class="secondary" id="btnClearSessionStorage">Xóa phiên lưu</button>
+      <label class="secondary" style="padding:7px 11px; border-radius:8px; cursor:pointer;">
+        Nạp lớp (.csv/.json)
+        <input id="rosterFileInput" type="file" accept=".csv,.json" style="display:none;" />
+      </label>
+      <label class="secondary" style="padding:7px 11px; border-radius:8px; cursor:pointer;">
+        Nạp đề (.json)
+        <input id="jsonFileInput" type="file" accept=".json" style="display:none;" />
+      </label>
+    </div>
+  </header>
+
+  <div class="layout" id="questionViewLayout">
+    <section class="panel">
+      <div class="timer-banner">
+        <div>
+          <span id="questionWeightBadge" style="background:#1d4ed8; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:700;">Trọng số: 1 điểm</span>
+          <span id="lockStatusBadge" style="margin-left:8px; font-size:13px; color:#4ade80;">Đang mở nhận đáp án</span>
+        </div>
+        <div>
+          <strong id="timerDisplay" style="font-size:20px; font-variant-numeric:tabular-nums;">30s</strong>
+        </div>
+      </div>
+      <div id="questionPrompt" style="font-size:20px; line-height:1.5; margin-bottom:14px;"></div>
+      <div id="questionOptions"></div>
+    </section>
+
+    <aside class="panel">
+      <h3 style="margin-top:0;">Thống kê lượt quét câu hiện tại</h3>
+      <div id="voteCountsDisplay" style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; text-align:center; margin-bottom:14px;"></div>
+      <div id="answeredListDisplay" style="font-size:13px; color:#cbd5e1; max-height:220px; overflow-y:auto;"></div>
+
+      <div id="unansweredRosterBox" style="margin-top:16px; background:#020617; border:1px solid #334155; border-radius:12px; padding:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;">
+          <strong style="font-size:15px; color:#fbbf24;">Chưa trả lời câu này</strong>
+          <span id="unansweredCountBadge" style="font-size:13px; color:#cbd5e1; background:#1e293b; padding:3px 10px; border-radius:999px;">0 học sinh</span>
+        </div>
+        <div id="unansweredRosterList" style="display:flex; flex-wrap:wrap; gap:8px; font-size:13px; color:#94a3b8;">
+          Chưa nạp danh sách lớp (.csv / .json).
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="panel" id="leaderboardViewPanel" style="display:none;">
+    <div style="display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px;">
+      <div>
+        <h2 style="margin:0; font-size:22px;">Bảng điểm tổng hợp &amp; xếp hạng toàn lớp (Hệ 10)</h2>
+        <div id="classAverageSummary" style="font-size:14px; color:#94a3b8; margin-top:4px;">
+          Điểm trung bình lớp: 0.00 • Số thẻ/học sinh tham gia: 0
+        </div>
+      </div>
+      <button class="secondary" id="btnBackToQuestionView">Quay lại màn hình câu hỏi</button>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="leaderboardTable" style="width:100%; border-collapse:collapse; background:#020617; border-radius:12px; overflow:hidden;">
+        <thead><tr id="leaderboardHeadRow" style="background:#1e293b; color:#e2e8f0;"></tr></thead>
+        <tbody id="leaderboardBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div id="scannerQrModal" style="display:none; position:fixed; inset:0; background:rgba(2,6,23,0.78); z-index:999; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:#0f172a; border:1px solid #334155; border-radius:16px; max-width:420px; width:100%; padding:22px; color:#f8fafc;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h3 style="margin:0; font-size:18px;">Quét mã QR mở trang quét thẻ</h3>
+        <button id="btnCloseQrModal" style="background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:8px; padding:4px 10px; cursor:pointer;">✕</button>
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="display:block; font-size:13px; color:#94a3b8; margin-bottom:6px;">Địa chỉ IPv4 LAN của máy tính:</label>
+        <div style="display:flex; gap:8px;">
+          <input id="lanIpInput" type="text" placeholder="Ví dụ: 192.168.1.25" style="flex:1;" />
+          <button id="btnApplyLanIp">Cập nhật</button>
+        </div>
+      </div>
+      <div style="background:#ffffff; padding:14px; border-radius:12px; display:flex; justify-content:center; align-items:center; margin:14px 0;">
+        <canvas id="scannerQrCanvas" width="240" height="240" style="width:220px; height:220px; image-rendering:pixelated;"></canvas>
+      </div>
+      <div id="scannerTargetUrlText" style="font-size:13px; color:#38bdf8; word-break:break-all; text-align:center; background:#1e293b; padding:8px 10px; border-radius:8px;"></div>
+    </div>
+  </div>
+
+  <script>
+    const SESSION_STORAGE_KEY = "plickers_presenter_session_v1";
+    const LAN_IP_STORAGE_KEY = "plickers_lan_ipv4_v1";
+    const SCANNER_HTTP_PORT = 8000;
+
+    let deckData = {
+      deckTitle: "Kiểm tra nhanh Đại số & Giải tích",
+      questions: [
+        {
+          id: "Q001",
+          points: 1,
+          promptLatex: "Tính đạo hàm của hàm số $y = x^3 - 3x + 2$.",
+          options: { A: "$y' = 3x^2 - 3$", B: "$y' = x^2 - 3$", C: "$y' = 3x^2 + 2$", D: "$y' = 3x - 3$" },
+          correctAnswer: "A"
+        }
+      ]
+    };
+
+    let currentIdx = 0;
+    const answersByQuestion = new Map();
+    const rosterByCode = new Map();
+    const timerStateByQuestion = new Map();
+    let isLeaderboardView = false;
+    let soundEnabled = true;
+    let audioCtx = null;
+
+    function getCurrentQuestion() {
+      return deckData.questions[currentIdx] || null;
+    }
+
+    function getCurrentQuestionMap() {
+      const q = getCurrentQuestion();
+      if (!q) return new Map();
+      if (!answersByQuestion.has(q.id)) answersByQuestion.set(q.id, new Map());
+      return answersByQuestion.get(q.id);
+    }
+
+    function getTimerState(qId) {
+      if (!timerStateByQuestion.has(qId)) {
+        timerStateByQuestion.set(qId, { remainingSec: 30, isRunning: false, isLocked: false });
+      }
+      return timerStateByQuestion.get(qId);
+    }
+
+    function getQuestionPoints(question) {
+      if (!question || typeof question !== "object") return 1;
+      const parsed = Number(question.points ?? question.weight ?? 1);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+    }
+
+    function getTotalDeckPoints() {
+      const questions = Array.isArray(deckData?.questions) ? deckData.questions : [];
+      return questions.reduce((sum, q) => sum + getQuestionPoints(q), 0);
+    }
+
+    function ensureAudioContext() {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return null;
+      if (!audioCtx) audioCtx = new AudioContextClass();
+      if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+      return audioCtx;
+    }
+
+    function playTone({ freq = 440, duration = 0.14, type = "sine", gainPeak = 0.16, delaySec = 0 }) {
+      if (!soundEnabled) return;
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
+      const now = ctx.currentTime + delaySec;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(gainPeak, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + duration + 0.02);
+    }
+
+    function playStartChime() {
+      playTone({ freq: 587.33, duration: 0.14, type: "triangle", gainPeak: 0.18, delaySec: 0 });
+      playTone({ freq: 783.99, duration: 0.2, type: "triangle", gainPeak: 0.2, delaySec: 0.14 });
+    }
+
+    function playCountdownTick(remainingSec) {
+      const isFinalSecond = remainingSec <= 1;
+      playTone({
+        freq: isFinalSecond ? 1046.5 : 880,
+        duration: isFinalSecond ? 0.16 : 0.09,
+        type: "sine",
+        gainPeak: isFinalSecond ? 0.22 : 0.15
+      });
+    }
+
+    function playTimeUpLockAlarm() {
+      playTone({ freq: 523.25, duration: 0.18, type: "sawtooth", gainPeak: 0.14, delaySec: 0 });
+      playTone({ freq: 349.23, duration: 0.34, type: "sawtooth", gainPeak: 0.16, delaySec: 0.18 });
+    }
+
+    function saveSessionToLocalStorage() {
+      try {
+        const serializedAnswers = {};
+        answersByQuestion.forEach((studentMap, qId) => {
+          serializedAnswers[qId] = Object.fromEntries(studentMap.entries());
+        });
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+          savedAt: new Date().toISOString(),
+          currentIdx,
+          deckData,
+          answersByQuestion: serializedAnswers,
+          rosterByCode: Object.fromEntries(rosterByCode.entries()),
+          timerStateByQuestion: Object.fromEntries(timerStateByQuestion.entries())
+        }));
+      } catch (err) {
+        console.warn("Không thể lưu phiên vào localStorage:", err);
+      }
+    }
+
+    function restoreSessionFromLocalStorage() {
+      try {
+        const raw = localStorage.getItem(SESSION_STORAGE_KEY);
+        if (!raw) return false;
+        const saved = JSON.parse(raw);
+        if (!saved || typeof saved !== "object") return false;
+        if (saved.deckData && Array.isArray(saved.deckData.questions) && saved.deckData.questions.length > 0) {
+          deckData = saved.deckData;
+        }
+        if (typeof saved.currentIdx === "number") {
+          currentIdx = Math.min(Math.max(0, saved.currentIdx), deckData.questions.length - 1);
+        }
+        answersByQuestion.clear();
+        if (saved.answersByQuestion && typeof saved.answersByQuestion === "object") {
+          Object.entries(saved.answersByQuestion).forEach(([qId, studentObj]) => {
+            const innerMap = new Map();
+            if (studentObj && typeof studentObj === "object") {
+              Object.entries(studentObj).forEach(([studentId, entry]) => innerMap.set(studentId, entry));
+            }
+            answersByQuestion.set(qId, innerMap);
+          });
+        }
+        rosterByCode.clear();
+        if (saved.rosterByCode && typeof saved.rosterByCode === "object") {
+          Object.entries(saved.rosterByCode).forEach(([code, name]) => {
+            if (typeof name === "string") rosterByCode.set(code, name);
+          });
+        }
+        timerStateByQuestion.clear();
+        if (saved.timerStateByQuestion && typeof saved.timerStateByQuestion === "object") {
+          Object.entries(saved.timerStateByQuestion).forEach(([qId, tState]) => {
+            if (tState && typeof tState === "object") {
+              timerStateByQuestion.set(qId, {
+                remainingSec: Number(tState.remainingSec) || 30,
+                isRunning: false,
+                isLocked: Boolean(tState.isLocked)
+              });
+            }
+          });
+        }
+        return true;
+      } catch (err) {
+        console.warn("Không thể khôi phục phiên từ localStorage:", err);
+        return false;
+      }
+    }
+
+    function normalizeRosterLookupKey(rawId) {
+      return String(rawId || "").trim().toLowerCase();
+    }
+
+    function extractNumericSuffixKey(rawId) {
+      const match = String(rawId || "").trim().match(/(\d+)$/);
+      return match ? String(parseInt(match[1], 10)) : "";
+    }
+
+    function getUnansweredStudentsForCurrentQuestion() {
+      if (!(rosterByCode instanceof Map) || rosterByCode.size === 0) {
+        return { hasRoster: false, students: [] };
+      }
+      const currentMap = getCurrentQuestionMap();
+      const answeredExactKeys = new Set();
+      const answeredNumericKeys = new Set();
+
+      currentMap.forEach((entry, studentId) => {
+        const idStr = entry?.studentId || studentId;
+        const exact = normalizeRosterLookupKey(idStr);
+        if (exact) answeredExactKeys.add(exact);
+        const numKey = extractNumericSuffixKey(idStr);
+        if (numKey) answeredNumericKeys.add(numKey);
+      });
+
+      const missing = [];
+      rosterByCode.forEach((name, code) => {
+        const codeStr = String(code).trim();
+        const exact = normalizeRosterLookupKey(codeStr);
+        const numKey = extractNumericSuffixKey(codeStr);
+        const isAnswered = (exact && answeredExactKeys.has(exact)) || (numKey && answeredNumericKeys.has(numKey));
+        if (!isAnswered) {
+          missing.push({ code: codeStr, name: String(name || codeStr).trim() });
+        }
+      });
+
+      missing.sort((a, b) => {
+        const na = parseInt(extractNumericSuffixKey(a.code), 10);
+        const nb = parseInt(extractNumericSuffixKey(b.code), 10);
+        if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb;
+        return a.code.localeCompare(b.code, "vi");
+      });
+
+      return { hasRoster: true, students: missing };
+    }
+
+    function renderUnansweredStudents() {
+      const badgeEl = document.getElementById("unansweredCountBadge");
+      const listEl = document.getElementById("unansweredRosterList");
+      if (!badgeEl || !listEl) return;
+
+      const { hasRoster, students } = getUnansweredStudentsForCurrentQuestion();
+      if (!hasRoster) {
+        badgeEl.textContent = "Chưa có lớp";
+        listEl.innerHTML = `<span style="color:#94a3b8;">Hãy nạp file danh sách lớp (.csv hoặc .json) để theo dõi học sinh chưa trả lời.</span>`;
+        return;
+      }
+
+      badgeEl.textContent = `${students.length} / ${rosterByCode.size} chưa trả lời`;
+      if (students.length === 0) {
+        listEl.innerHTML = `<span style="color:#4ade80; font-weight:600;">Tất cả học sinh trong danh sách lớp đã trả lời câu này!</span>`;
+        return;
+      }
+
+      listEl.innerHTML = "";
+      students.forEach((st) => {
+        const chip = document.createElement("span");
+        chip.textContent = `${st.code} - ${st.name}`;
+        chip.style.cssText = "padding:5px 10px; border-radius:8px; background:#1e293b; border:1px solid #475569; color:#f8fafc; font-weight:500;";
+        listEl.appendChild(chip);
+      });
+    }
+
+    function buildGradingSummary() {
+      const questions = Array.isArray(deckData?.questions) ? deckData.questions : [];
+      const totalQuestions = questions.length;
+      const totalMaxPoints = getTotalDeckPoints();
+      const allStudentIds = new Set();
+
+      rosterByCode.forEach((_name, code) => allStudentIds.add(String(code).trim()));
+      answersByQuestion.forEach((studentMap) => studentMap.forEach((_entry, studentId) => allStudentIds.add(String(studentId).trim())));
+
+      const students = [];
+      allStudentIds.forEach((studentId) => {
+        let correctCount = 0;
+        let answeredCount = 0;
+        let earnedPoints = 0;
+        const perQuestion = {};
+        let resolvedName = rosterByCode.has(studentId) ? rosterByCode.get(studentId) : studentId;
+
+        questions.forEach((q) => {
+          const qMap = answersByQuestion.get(q.id);
+          const entry = qMap ? qMap.get(studentId) : null;
+          const qPts = getQuestionPoints(q);
+          if (entry && entry.studentName) resolvedName = entry.studentName;
+
+          if (entry && entry.answer) {
+            answeredCount += 1;
+            const isCorrect = Boolean(q.correctAnswer) && String(entry.answer).toUpperCase() === String(q.correctAnswer).toUpperCase();
+            if (isCorrect) {
+              correctCount += 1;
+              earnedPoints += qPts;
+            }
+            perQuestion[q.id] = {
+              selected_answer: entry.answer,
+              is_correct: isCorrect,
+              points_awarded: isCorrect ? qPts : 0,
+              max_points: qPts
+            };
+          } else {
+            perQuestion[q.id] = { selected_answer: null, is_correct: false, points_awarded: 0, max_points: qPts };
+          }
+        });
+
+        const scoreScale10 = totalMaxPoints > 0 ? Number(((earnedPoints / totalMaxPoints) * 10).toFixed(2)) : 0;
+        students.push({
+          student_id: studentId,
+          student_name: resolvedName,
+          correct_count: correctCount,
+          answered_count: answeredCount,
+          total_questions: totalQuestions,
+          earned_points: Number(earnedPoints.toFixed(2)),
+          max_points: Number(totalMaxPoints.toFixed(2)),
+          score_scale_10: scoreScale10,
+          questions: perQuestion
+        });
+      });
+
+      return { total_questions: totalQuestions, total_max_points: Number(totalMaxPoints.toFixed(2)), students };
+    }
+
+    function buildRankedLeaderboard() {
+      const summary = buildGradingSummary();
+      const ranked = [...summary.students].sort((a, b) => {
+        if (b.score_scale_10 !== a.score_scale_10) return b.score_scale_10 - a.score_scale_10;
+        if (b.correct_count !== a.correct_count) return b.correct_count - a.correct_count;
+        return String(a.student_id).localeCompare(String(b.student_id));
+      });
+
+      let currentRank = 0;
+      ranked.forEach((item, idx) => {
+        if (idx === 0) currentRank = 1;
+        else {
+          const prev = ranked[idx - 1];
+          if (!(item.score_scale_10 === prev.score_scale_10 && item.correct_count === prev.correct_count)) {
+            currentRank = idx + 1;
+          }
+        }
+        item.rank = currentRank;
+      });
+
+      return { ...summary, rankedStudents: ranked };
+    }
+
+    function renderLeaderboardView() {
+      const questionLayout = document.getElementById("questionViewLayout");
+      const leaderboardPanel = document.getElementById("leaderboardViewPanel");
+      const toggleBtn = document.getElementById("btnToggleLeaderboard");
+      if (!questionLayout || !leaderboardPanel || !toggleBtn) return;
+
+      questionLayout.style.display = isLeaderboardView ? "none" : "grid";
+      leaderboardPanel.style.display = isLeaderboardView ? "block" : "none";
+      toggleBtn.textContent = isLeaderboardView ? "Xem màn hình câu hỏi" : "Bảng điểm & Xếp hạng";
+      if (!isLeaderboardView) return;
+
+      const data = buildRankedLeaderboard();
+      const questions = deckData.questions || [];
+      const headRow = document.getElementById("leaderboardHeadRow");
+      const tbody = document.getElementById("leaderboardBody");
+      const avgEl = document.getElementById("classAverageSummary");
+
+      const totalStudents = data.rankedStudents.length;
+      const avgScore = totalStudents > 0
+        ? (data.rankedStudents.reduce((acc, s) => acc + s.score_scale_10, 0) / totalStudents).toFixed(2)
+        : "0.00";
+      avgEl.textContent = `Điểm trung bình lớp: ${avgScore} / 10 • Số thẻ/học sinh đã ghi nhận: ${totalStudents} • Tổng số câu: ${questions.length}`;
+
+      headRow.innerHTML = "";
+      const fixedLeftHeaders = ["Hạng", "Mã thẻ", "Họ tên học sinh"];
+      const fixedRightHeaders = ["Số câu đúng", "Điểm trọng số", "Điểm hệ 10"];
+      const qHeaders = questions.map((q) => `${q.id} (${getQuestionPoints(q)}đ)`);
+
+      [...fixedLeftHeaders, ...qHeaders, ...fixedRightHeaders].forEach((title) => {
+        const th = document.createElement("th");
+        th.textContent = title;
+        th.style.cssText = `padding:12px 10px; border-bottom:1px solid #334155; text-align:${title === "Họ tên học sinh" ? "left" : "center"}; white-space:nowrap;`;
+        headRow.appendChild(th);
+      });
+
+      tbody.innerHTML = "";
+      if (totalStudents === 0) {
+        const tr = document.createElement("tr");
+        const td = document.createElement("td");
+        td.colSpan = fixedLeftHeaders.length + questions.length + fixedRightHeaders.length;
+        td.textContent = "Chưa có dữ liệu trả lời nào được quét từ camera.";
+        td.style.cssText = "padding:24px; text-align:center; color:#94a3b8;";
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        return;
+      }
+
+      data.rankedStudents.forEach((st) => {
+        const tr = document.createElement("tr");
+        tr.style.borderBottom = "1px solid #1e293b";
+        const rankBadge = st.rank === 1 ? "🥇 #1" : st.rank === 2 ? "🥈 #2" : st.rank === 3 ? "🥉 #3" : `#${st.rank}`;
+
+        const addCell = (text, styleText = "") => {
+          const td = document.createElement("td");
+          td.textContent = text;
+          td.style.cssText = `padding:10px; text-align:center; ${styleText}`;
+          tr.appendChild(td);
+        };
+
+        addCell(rankBadge, "font-weight:700;");
+        addCell(st.student_id, "color:#94a3b8;");
+        addCell(st.student_name, "text-align:left; font-weight:600;");
+
+        questions.forEach((q) => {
+          const qRes = st.questions[q.id];
+          if (!qRes || !qRes.selected_answer) addCell("—", "color:#64748b; font-weight:700;");
+          else if (qRes.is_correct) addCell(`${qRes.selected_answer} ✓`, "color:#4ade80; font-weight:700;");
+          else addCell(`${qRes.selected_answer} ✗`, "color:#f87171; font-weight:700;");
+        });
+
+        addCell(`${st.correct_count} / ${st.total_questions}`);
+        addCell(`${st.earned_points} / ${st.max_points}`, "color:#cbd5e1;");
+        addCell(st.score_scale_10.toFixed(2), `font-weight:800; font-size:16px; color:${st.score_scale_10 >= 8 ? "#4ade80" : st.score_scale_10 >= 5 ? "#38bdf8" : "#f87171"};`);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function escapeCsvCell(value) {
+      const str = value === null || value === undefined ? "" : String(value);
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+
+    function exportGradesToCsv() {
+      const data = buildRankedLeaderboard();
+      const questions = Array.isArray(deckData?.questions) ? deckData.questions : [];
+      const rows = data.rankedStudents || [];
+
+      const perQuestionHeaders = [];
+      questions.forEach((q) => {
+        const pts = getQuestionPoints(q);
+        perQuestionHeaders.push(`${q.id} Đáp án`);
+        perQuestionHeaders.push(`${q.id} Điểm (/${pts})`);
+      });
+
+      const headers = [
+        "Hạng", "Mã thẻ", "Họ tên học sinh",
+        ...perQuestionHeaders,
+        "Số câu đúng", "Tổng số câu", "Điểm trọng số", "Tổng điểm trọng số", "Điểm hệ 10"
+      ];
+
+      const csvLines = [headers.map(escapeCsvCell).join(",")];
+      rows.forEach((st, idx) => {
+        const qCells = [];
+        questions.forEach((q) => {
+          const qRes = st.questions ? st.questions[q.id] : null;
+          if (!qRes || !qRes.selected_answer) {
+            qCells.push("", 0);
+          } else {
+            qCells.push(qRes.selected_answer, qRes.points_awarded ?? (qRes.is_correct ? getQuestionPoints(q) : 0));
+          }
+        });
+        csvLines.push([
+          st.rank ?? idx + 1,
+          st.student_id,
+          st.student_name,
+          ...qCells,
+          st.correct_count,
+          st.total_questions,
+          st.earned_points ?? 0,
+          st.max_points ?? getTotalDeckPoints(),
+          Number(st.score_scale_10 ?? 0).toFixed(2)
+        ].map(escapeCsvCell).join(","));
+      });
+
+      const blob = new Blob(["﻿" + csvLines.join("
+")], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `bang-diem-lop-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    function renderQuestionSelect() {
+      const sel = document.getElementById("questionSelect");
+      sel.innerHTML = "";
+      deckData.questions.forEach((q, idx) => {
+        const opt = document.createElement("option");
+        opt.value = String(idx);
+        opt.textContent = `${q.id} (${getQuestionPoints(q)}đ)`;
+        if (idx === currentIdx) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+
+    function renderTimerBanner() {
+      const q = getCurrentQuestion();
+      if (!q) return;
+      const st = getTimerState(q.id);
+      document.getElementById("timerDisplay").textContent = `${st.remainingSec}s`;
+      document.getElementById("btnStartPauseTimer").textContent = st.isRunning ? "Tạm dừng" : "Bắt đầu đếm ngược";
+      const lockBadge = document.getElementById("lockStatusBadge");
+      if (st.isLocked) {
+        lockBadge.textContent = "Đã hết giờ / Khóa đáp án";
+        lockBadge.style.color = "#f87171";
+      } else {
+        lockBadge.textContent = "Đang mở nhận đáp án";
+        lockBadge.style.color = "#4ade80";
+      }
+    }
+
+    function renderStatsAndStudents() {
+      const q = getCurrentQuestion();
+      if (!q) return;
+      const map = getCurrentQuestionMap();
+      const counts = { A: 0, B: 0, C: 0, D: 0 };
+      const rows = [];
+
+      map.forEach((entry, sid) => {
+        if (counts[entry.answer] !== undefined) counts[entry.answer] += 1;
+        const name = rosterByCode.get(sid) || entry.studentName || sid;
+        rows.push(`${sid} - ${name}: <strong>${entry.answer}</strong>`);
+      });
+
+      const voteBox = document.getElementById("voteCountsDisplay");
+      voteBox.innerHTML = ["A", "B", "C", "D"].map((k) =>
+        `<div style="background:#1e293b; padding:10px; border-radius:8px; border:1px solid ${q.correctAnswer === k ? "#22c55e" : "#334155"};">
+          <div style="font-size:12px; color:#94a3b8;">Đáp án ${k}</div>
+          <div style="font-size:20px; font-weight:700;">${counts[k]}</div>
+        </div>`
+      ).join("");
+
+      document.getElementById("answeredListDisplay").innerHTML = rows.length
+        ? rows.map((r) => `<div style="padding:4px 0; border-bottom:1px solid #1e293b;">${r}</div>`).join("")
+        : `<div style="color:#94a3b8;">Chưa có học sinh quét thẻ cho câu này.</div>`;
+
+      renderUnansweredStudents();
+      if (isLeaderboardView) renderLeaderboardView();
+    }
+
+    function renderCurrentQuestion() {
+      document.getElementById("deckTitleDisplay").textContent = deckData.deckTitle || "Bộ câu hỏi";
+      const q = getCurrentQuestion();
+      if (!q) return;
+
+      document.getElementById("questionWeightBadge").textContent = `Trọng số: ${getQuestionPoints(q)} điểm`;
+      document.getElementById("questionPrompt").textContent = `${q.id}: ${q.promptLatex || ""}`;
+
+      const optsEl = document.getElementById("questionOptions");
+      optsEl.innerHTML = "";
+      ["A", "B", "C", "D"].forEach((key) => {
+        const div = document.createElement("div");
+        div.className = "option-card";
+        div.textContent = `${key}. ${q.options?.[key] || ""}`;
+        optsEl.appendChild(div);
+      });
+
+      if (typeof renderMathInElement === "function") {
+        renderMathInElement(document.body, {
+          delimiters: [
+            { left: "$$", right: "$$", display: true },
+            { left: "$", right: "$", display: false }
+          ],
+          throwOnError: false
+        });
+      }
+
+      renderTimerBanner();
+      renderStatsAndStudents();
+    }
+
+    function startCountdownInterval() {
+      setInterval(() => {
+        const q = getCurrentQuestion();
+        if (!q) return;
+        const st = getTimerState(q.id);
+        if (!st.isRunning) return;
+
+        if (st.remainingSec > 1) {
+          st.remainingSec -= 1;
+          if (st.remainingSec <= 5) playCountdownTick(st.remainingSec);
+          renderTimerBanner();
+        } else {
+          st.remainingSec = 0;
+          st.isRunning = false;
+          st.isLocked = true;
+          playTimeUpLockAlarm();
+          renderTimerBanner();
+          saveSessionToLocalStorage();
+        }
+      }, 1000);
+    }
+
+    // QR Code generator (ECC-L Byte mode)
+    function generateQrMatrix(text) {
+      const bytes = new TextEncoder().encode(text);
+      const dataBits = [];
+      const pushBits = (val, len) => { for (let i = len - 1; i >= 0; i--) dataBits.push((val >> i) & 1); };
+      const ecLowByteCapacities = [0, 17, 32, 53, 78, 106, 134];
+      const ecLowTotalCodewords = [0, 26, 44, 70, 100, 134, 172];
+      const ecLowBlocks = [0, 1, 1, 1, 1, 1, 2];
+
+      let version = 0;
+      for (let v = 1; v <= 6; v++) {
+        if (bytes.length <= ecLowByteCapacities[v] - 2) { version = v; break; }
+      }
+      if (!version) throw new Error("URL quá dài cho mã QR v1-v6.");
+
+      const size = version * 4 + 17;
+      const dataCodewordsCap = ecLowByteCapacities[version];
+      const totalCodewordsCap = ecLowTotalCodewords[version];
+      const numBlocks = ecLowBlocks[version];
+
+      pushBits(0b0100, 4);
+      pushBits(bytes.length, 8);
+      for (const b of bytes) pushBits(b, 8);
+      const maxDataBits = dataCodewordsCap * 8;
+      pushBits(0, Math.min(4, Math.max(0, maxDataBits - dataBits.length)));
+      while (dataBits.length % 8 !== 0) dataBits.push(0);
+
+      const dataBytes = [];
+      for (let i = 0; i < dataBits.length; i += 8) {
+        let v = 0;
+        for (let b = 0; b < 8; b++) v = (v << 1) | (dataBits[i + b] || 0);
+        dataBytes.push(v);
+      }
+      const padBytes = [0xec, 0x11];
+      let pIdx = 0;
+      while (dataBytes.length < dataCodewordsCap) dataBytes.push(padBytes[pIdx++ % 2]);
+
+      const expTable = new Array(256);
+      const logTable = new Array(256);
+      let x = 1;
+      for (let i = 0; i < 255; i++) { expTable[i] = x; logTable[x] = i; x <<= 1; if (x & 0x100) x ^= 0x11d; }
+      expTable[255] = expTable[0];
+      const gfMul = (a, b) => (a === 0 || b === 0) ? 0 : expTable[(logTable[a] + logTable[b]) % 255];
+
+      function rsEncodeBlock(blockData, ecLen) {
+        let poly = [1];
+        for (let i = 0; i < ecLen; i++) {
+          const next = new Array(poly.length + 1).fill(0);
+          for (let j = 0; j < poly.length; j++) { next[j] ^= poly[j]; next[j + 1] ^= gfMul(poly[j], expTable[i]); }
+          poly = next;
+        }
+        const gen = poly.slice(1);
+        const ecc = new Array(ecLen).fill(0);
+        for (let i = 0; i < blockData.length; i++) {
+          const factor = blockData[i] ^ ecc[0];
+          ecc.shift(); ecc.push(0);
+          for (let j = 0; j < ecLen; j++) ecc[j] ^= gfMul(gen[j], factor);
+        }
+        return ecc;
+      }
+
+      const totalEc = totalCodewordsCap - dataCodewordsCap;
+      const ecPerBlock = Math.floor(totalEc / numBlocks);
+      const dataBlocks = [], eccBlocks = [];
+      const baseLen = Math.floor(dataBytes.length / numBlocks);
+      const extra = dataBytes.length % numBlocks;
+      let off = 0;
+      for (let b = 0; b < numBlocks; b++) {
+        const len = baseLen + (b >= numBlocks - extra ? 1 : 0);
+        const chunk = dataBytes.slice(off, off + len);
+        off += len;
+        dataBlocks.push(chunk);
+        eccBlocks.push(rsEncodeBlock(chunk, ecPerBlock));
+      }
+
+      const finalStream = [];
+      const maxLen = Math.max(...dataBlocks.map((b) => b.length));
+      for (let i = 0; i < maxLen; i++) for (const blk of dataBlocks) if (i < blk.length) finalStream.push(blk[i]);
+      for (let i = 0; i < ecPerBlock; i++) for (const blk of eccBlocks) if (i < blk.length) finalStream.push(blk[i]);
+
+      const matrix = Array.from({ length: size }, () => Array(size).fill(false));
+      const reserved = Array.from({ length: size }, () => Array(size).fill(false));
+      const placeFinder = (rTop, cLeft) => {
+        for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+          const rr = rTop + r, cc = cLeft + c;
+          if (rr < 0 || rr >= size || cc < 0 || cc >= size) continue;
+          reserved[rr][cc] = true;
+          const out = r === 0 || r === 6 || c === 0 || c === 6;
+          const inn = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+          matrix[rr][cc] = r >= 0 && r <= 6 && c >= 0 && c <= 6 && (out || inn);
+        }
+      };
+      placeFinder(0, 0); placeFinder(0, size - 7); placeFinder(size - 7, 0);
+      if (version >= 2) {
+        const ar = size - 7, ac = size - 7;
+        for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++) {
+          const rr = ar + r, cc = ac + c;
+          if (reserved[rr][cc]) continue;
+          reserved[rr][cc] = true;
+          matrix[rr][cc] = Math.abs(r) === 2 || Math.abs(c) === 2 || (r === 0 && c === 0);
+        }
+      }
+      for (let i = 8; i < size - 8; i++) {
+        if (!reserved[6][i]) { reserved[6][i] = true; matrix[6][i] = i % 2 === 0; }
+        if (!reserved[i][6]) { reserved[i][6] = true; matrix[i][6] = i % 2 === 0; }
+      }
+      const darkRow = 4 * version + 9;
+      reserved[darkRow][8] = true; matrix[darkRow][8] = true;
+      for (let i = 0; i < 9; i++) { if (i < size) { reserved[8][i] = true; reserved[i][8] = true; } }
+      for (let i = 0; i < 8; i++) { reserved[8][size - 1 - i] = true; reserved[size - 1 - i][8] = true; }
+
+      const bitStream = [];
+      for (const cw of finalStream) for (let b = 7; b >= 0; b--) bitStream.push((cw >> b) & 1);
+      let bitPtr = 0, goingUp = true;
+      for (let col = size - 1; col >= 1; col -= 2) {
+        if (col === 6) col = 5;
+        for (let step = 0; step < size; step++) {
+          const row = goingUp ? size - 1 - step : step;
+          for (let cOff = 0; cOff <= 1; cOff++) {
+            const c = col - cOff;
+            if (reserved[row][c]) continue;
+            const bit = bitPtr < bitStream.length ? bitStream[bitPtr++] : 0;
+            matrix[row][c] = (((row + c) % 2 === 0) ? (bit ^ 1) : bit) === 1;
+          }
+        }
+        goingUp = !goingUp;
+      }
+
+      const formatBits = 0x77c4;
+      const fBitAt = (idx) => ((formatBits >> (14 - idx)) & 1) === 1;
+      const aroundTopLeft = [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]];
+      aroundTopLeft.forEach(([r, c], idx) => { matrix[r][c] = fBitAt(idx); });
+      for (let i = 0; i < 8; i++) matrix[8][size - 1 - i] = fBitAt(i);
+      for (let i = 8; i < 15; i++) matrix[size - 15 + i][8] = fBitAt(i);
+      return matrix;
+    }
+
+    function renderScannerQrCode() {
+      const ipInput = document.getElementById("lanIpInput");
+      const canvas = document.getElementById("scannerQrCanvas");
+      const urlTextEl = document.getElementById("scannerTargetUrlText");
+      if (!canvas || !urlTextEl) return;
+
+      const savedIp = localStorage.getItem(LAN_IP_STORAGE_KEY) || "";
+      const currentIp = ipInput && ipInput.value.trim() ? ipInput.value.trim() : savedIp;
+      if (ipInput && !ipInput.value && savedIp) ipInput.value = savedIp;
+
+      const targetUrl = `http://${currentIp || "<LAN_IP>"}:${SCANNER_HTTP_PORT}/mobile-scanner/index.html`;
+      urlTextEl.textContent = targetUrl;
+
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      if (!currentIp) {
+        ctx.fillStyle = "#475569";
+        ctx.font = "13px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Nhập IPv4 LAN để tạo mã QR", canvas.width / 2, canvas.height / 2);
+        return;
+      }
+
+      try {
+        const matrix = generateQrMatrix(targetUrl);
+        const quietZone = 4;
+        const totalModules = matrix.length + quietZone * 2;
+        const scale = Math.floor(Math.min(canvas.width, canvas.height) / totalModules);
+        const drawnSize = scale * totalModules;
+        const ox = Math.floor((canvas.width - drawnSize) / 2);
+        const oy = Math.floor((canvas.height - drawnSize) / 2);
+        ctx.fillStyle = "#000000";
+        for (let r = 0; r < matrix.length; r++) {
+          for (let c = 0; c < matrix.length; c++) {
+            if (matrix[r][c]) ctx.fillRect(ox + (c + quietZone) * scale, oy + (r + quietZone) * scale, scale, scale);
+          }
+        }
+      } catch (err) {
+        ctx.fillStyle = "#dc2626";
+        ctx.font = "13px system-ui, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText(err.message || "Lỗi tạo mã QR", canvas.width / 2, canvas.height / 2);
+      }
+    }
+
+    // Event bindings
+    document.getElementById("btnPrevQ").addEventListener("click", () => {
+      if (currentIdx > 0) { currentIdx -= 1; renderQuestionSelect(); renderCurrentQuestion(); saveSessionToLocalStorage(); }
+    });
+    document.getElementById("btnNextQ").addEventListener("click", () => {
+      if (currentIdx < deckData.questions.length - 1) { currentIdx += 1; renderQuestionSelect(); renderCurrentQuestion(); saveSessionToLocalStorage(); }
+    });
+    document.getElementById("questionSelect").addEventListener("change", (e) => {
+      currentIdx = parseInt(e.target.value, 10) || 0;
+      renderCurrentQuestion();
+      saveSessionToLocalStorage();
+    });
+    document.getElementById("btnStartPauseTimer").addEventListener("click", () => {
+      const q = getCurrentQuestion();
+      if (!q) return;
+      const st = getTimerState(q.id);
+      if (st.isLocked && st.remainingSec === 0) {
+        st.remainingSec = 30;
+        st.isLocked = false;
+      }
+      const wasRunning = st.isRunning;
+      st.isRunning = !st.isRunning;
+      if (!wasRunning && st.isRunning) playStartChime();
+      renderTimerBanner();
+      saveSessionToLocalStorage();
+    });
+    document.getElementById("btnToggleSound").addEventListener("click", () => {
+      soundEnabled = !soundEnabled;
+      if (soundEnabled) ensureAudioContext();
+      document.getElementById("btnToggleSound").textContent = soundEnabled ? "Âm thanh: BẬT" : "Âm thanh: TẮT";
+    });
+    document.getElementById("btnToggleLeaderboard").addEventListener("click", () => {
+      isLeaderboardView = !isLeaderboardView;
+      renderLeaderboardView();
+    });
+    document.getElementById("btnBackToQuestionView").addEventListener("click", () => {
+      isLeaderboardView = false;
+      renderLeaderboardView();
+    });
+    document.getElementById("btnExportCsv").addEventListener("click", exportGradesToCsv);
+    document.getElementById("btnToggleQrModal").addEventListener("click", () => {
+      document.getElementById("scannerQrModal").style.display = "flex";
+      renderScannerQrCode();
+    });
+    document.getElementById("btnCloseQrModal").addEventListener("click", () => {
+      document.getElementById("scannerQrModal").style.display = "none";
+    });
+    document.getElementById("btnApplyLanIp").addEventListener("click", () => {
+      const val = document.getElementById("lanIpInput").value.trim();
+      localStorage.setItem(LAN_IP_STORAGE_KEY, val);
+      renderScannerQrCode();
+    });
+    document.getElementById("btnClearSessionStorage").addEventListener("click", () => {
+      localStorage.removeItem(SESSION_STORAGE_KEY);
+      answersByQuestion.clear();
+      rosterByCode.clear();
+      renderStatsAndStudents();
+      alert("Đã xóa dữ liệu phiên lưu trên trình duyệt.");
+    });
+
+    document.getElementById("rosterFileInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      rosterByCode.clear();
+      if (file.name.endsWith(".json")) {
+        const arr = JSON.parse(text);
+        if (Array.isArray(arr)) {
+          arr.forEach((item) => {
+            const code = String(item.code ?? item.studentId ?? item.id ?? "").trim();
+            const name = String(item.name ?? item.studentName ?? code).trim();
+            if (code) rosterByCode.set(code, name);
+          });
+        }
+      } else {
+        text.split(/\r?\n/).forEach((line, idx) => {
+          const cols = line.split(",").map((c) => c.replace(/^"|"$/g, "").trim());
+          if (cols.length >= 2 && cols[0]) {
+            if (idx === 0 && /ma|code|id/i.test(cols[0])) return;
+            rosterByCode.set(cols[0], cols[1] || cols[0]);
+          }
+        });
+      }
+      renderStatsAndStudents();
+      saveSessionToLocalStorage();
+    });
+
+    document.getElementById("jsonFileInput").addEventListener("change", async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const parsed = JSON.parse(await file.text());
+      if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+        deckData = parsed;
+        currentIdx = 0;
+        renderQuestionSelect();
+        renderCurrentQuestion();
+        saveSessionToLocalStorage();
+      }
+    });
+
+    // Connect WebSocket
+    const ws = new WebSocket(`ws://${location.hostname || "localhost"}:8080`);
+    ws.onopen = () => {
+      const b = document.getElementById("wsBadge");
+      b.textContent = "WS: Đã kết nối";
+      b.style.color = "#4ade80";
+    };
+    ws.onclose = () => {
+      const b = document.getElementById("wsBadge");
+      b.textContent = "WS: Mất kết nối";
+      b.style.color = "#f87171";
+    };
+    ws.onmessage = (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (_) { return; }
+      if (msg.type === "scan_answer" && msg.studentId && msg.answer) {
+        const targetQId = msg.questionId || getCurrentQuestion()?.id;
+        if (!targetQId) return;
+        const tState = getTimerState(targetQId);
+        if (tState.isLocked) return;
+
+        if (!answersByQuestion.has(targetQId)) answersByQuestion.set(targetQId, new Map());
+        const sid = String(msg.studentId).trim();
+        answersByQuestion.get(targetQId).set(sid, {
+          studentId: sid,
+          studentName: rosterByCode.get(sid) || msg.studentName || sid,
+          answer: String(msg.answer).toUpperCase(),
+          timestamp: msg.timestamp || Date.now()
+        });
+        renderStatsAndStudents();
+        saveSessionToLocalStorage();
+      }
+    };
+
+    window.addEventListener("DOMContentLoaded", () => {
+      restoreSessionFromLocalStorage();
+      renderQuestionSelect();
+      renderCurrentQuestion();
+      startCountdownInterval();
+    });
+  </script>
+</body>
+</html>

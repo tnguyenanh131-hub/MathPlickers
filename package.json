@@ -1,0 +1,9 @@
+{
+  "name": "plickers-math-suite-server",
+  "version": "1.0.0",
+  "description": "WebSocket sync server for Plickers Math Suite",
+  "main": "sync-server.js",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
