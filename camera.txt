@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1e1b4b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>MathPlickers Cam - Ứng dụng Quét thẻ trên Điện thoại</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #090d16;
+            color: #f8fafc;
+            overscroll-behavior: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        @keyframes scanBeam {
+            0% { top: 10%; opacity: 0.35; }
+            50% { top: 88%; opacity: 0.95; }
+            100% { top: 10%; opacity: 0.35; }
+        }
+        .scan-beam {
+            position: absolute;
+            left: 8%;
+            width: 84%;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #38bdf8, #7dd3fc, #38bdf8, transparent);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.7);
+            animation: scanBeam 2.2s infinite ease-in-out;
+            transition: opacity 0.15s ease;
+        }
+        .roi-confirmed {
+            border-color: #22c55e !important;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.42), 0 0 24px rgba(34, 197, 94, 0.45) !important;
+        }
+        .roi-confirmed .scan-beam {
+            opacity: 0;
+        }
+    </style>
+</head>
+<body class="h-[100dvh] flex flex-col overflow-hidden select-none">
+
+    <!-- Thanh trạng thái trên cùng -->
+    <header class="bg-indigo-950 border-b border-indigo-800/80 px-3.5 py-2.5 flex items-center justify-between shrink-0 z-20">
+        <div class="flex items-center gap-2">
+            <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center shadow">
+                <i class="fa-solid fa-qrcode text-white text-sm"></i>
+            </div>
+            <div>
+                <div class="font-extrabold text-sm leading-tight">MathPlickers <span class="text-blue-400">Cam</span></div>
+                <div id="conn-status-text" class="text-[11px] text-amber-300 font-semibold flex items-center gap-1">
+                    <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span> Chưa kết nối máy tính
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+            <span id="active-question-pill" class="bg-indigo-900 border border-indigo-700 text-indigo-200 text-xs font-bold px-2.5 py-1 rounded-lg">
+                Câu 1
+            </span>
+            <button onclick="toggleConnectSheet()" class="px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow">
+                <i class="fa-solid fa-link mr-1"></i>Phòng
+            </button>
+        </div>
+    </header>
+
+    <!-- Bảng kết nối Mã phòng từ máy tính trình chiếu -->
+    <div id="connect-sheet" class="bg-slate-900 border-b border-slate-800 p-3.5 shrink-0 z-20">
+        <div class="max-w-md mx-auto space-y-2.5">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-extrabold uppercase tracking-wider text-blue-300">
+                    <i class="fa-solid fa-wifi mr-1"></i> Kết nối tới Máy tính Trình chiếu
+                </span>
+                <span id="class-name-label" class="text-[11px] text-slate-400 font-semibold truncate max-w-[160px]">Lớp học</span>
+            </div>
+            <div class="flex gap-2">
+                <input type="text" id="room-code-input" placeholder="Nhập mã phòng (VD: MP-1234)" autocapitalize="characters"
+                    class="flex-1 bg-slate-800 border border-slate-700 focus:border-blue-500 rounded-xl px-3.5 py-2 text-sm font-extrabold uppercase tracking-wider text-amber-300 focus:outline-none">
+                <button onclick="connectToHostRoom()" id="btn-connect-room"
+                    class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-extrabold shadow shrink-0 transition">
+                    Kết nối
+                </button>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-snug">
+                Xem <b>Mã phòng (MP-xxxx)</b> ở góc trên bên phải màn hình máy tính trình chiếu để liên kết trực tiếp.
+            </p>
+        </div>
+    </div>
+
+    <!-- Khu vực Camera Quét Thẻ Trực Tiếp -->
+    <main class="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
+        <video id="mobile-video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+        <canvas id="overlay-canvas" class="absolute inset-0 w-full h-full pointer-events-none z-10"></canvas>
+        <canvas id="proc-canvas" class="hidden"></canvas>
+
+        <!-- Khung ngắm định vị thẻ Plickers -->
+        <div id="viewfinder-box" class="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-10">
+            <div id="roi-frame" class="w-64 h-64 sm:w-72 sm:h-72 border-2 border-slate-300/65 rounded-2xl relative shadow-[0_0_0_9999px_rgba(0,0,0,0.42)] transition-all duration-150">
+                <div class="scan-beam"></div>
+                <div id="roi-tl" class="absolute -top-1 -left-1 w-6 h-6 border-t-4 border-l-4 border-sky-400 rounded-tl-lg transition-colors"></div>
+                <div id="roi-tr" class="absolute -top-1 -right-1 w-6 h-6 border-t-4 border-r-4 border-sky-400 rounded-tr-lg transition-colors"></div>
+                <div id="roi-bl" class="absolute -bottom-1 -left-1 w-6 h-6 border-b-4 border-l-4 border-sky-400 rounded-bl-lg transition-colors"></div>
+                <div id="roi-br" class="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-sky-400 rounded-br-lg transition-colors"></div>
+            </div>
+            <div id="roi-status-pill" class="mt-3 bg-black/80 backdrop-blur px-3.5 py-1 rounded-full text-xs font-semibold text-slate-200 border border-white/15 transition-colors">
+                Đưa các thẻ vào vùng camera • Giữ thẻ phẳng, đủ sáng và không che mã
+            </div>
+        </div>
+
+        <!-- Màn hình bật Camera lần đầu -->
+        <div id="camera-start-overlay" class="absolute inset-0 bg-slate-950/95 z-30 flex flex-col items-center justify-center p-6 text-center">
+            <div class="w-16 h-16 rounded-2xl bg-indigo-900/80 border border-blue-500/40 flex items-center justify-center mb-4">
+                <i class="fa-solid fa-camera text-3xl text-blue-400"></i>
+            </div>
+            <h2 class="text-lg font-extrabold text-white mb-1">Sẵn sàng Quét Thẻ Học Sinh</h2>
+            <p class="text-xs text-slate-400 max-w-xs mb-5 leading-relaxed">
+                Đưa nhiều thẻ vào vùng camera. Hệ thống dò theo nhiều vùng ảnh, xác thực mã thẻ 5×5 và hướng A/B/C/D qua nhiều khung hình trước khi ghi nhận từng học sinh.
+            </p>
+            <button onclick="startMobileCamera()" class="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm shadow-lg flex items-center gap-2 transition">
+                <i class="fa-solid fa-video"></i>
+                <span>Bật Camera Quét Thẻ</span>
+            </button>
+        </div>
+
+        <!-- Banner thông báo kết quả đã ghi nhận chính thức -->
+        <div id="last-scan-banner" class="hidden absolute top-3 left-3 right-3 z-20 bg-emerald-950/95 border border-emerald-400 text-white rounded-2xl px-4 py-2.5 shadow-xl flex items-center justify-between">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span id="banner-card-num" class="w-9 h-9 rounded-xl bg-white text-emerald-950 font-black text-sm flex items-center justify-center shrink-0">#1</span>
+                <div class="truncate">
+                    <div id="banner-student-name" class="font-extrabold text-sm truncate">Nguyễn Minh Anh</div>
+                    <div id="banner-sub-status" class="text-[11px] text-emerald-200">Đã xác nhận &amp; gửi về máy tính</div>
+                </div>
+            </div>
+            <div id="banner-option" class="w-10 h-10 rounded-xl bg-emerald-400 text-slate-950 font-black text-xl flex items-center justify-center shrink-0">A</div>
+        </div>
+    </main>
+
+    <!-- Thanh điều khiển nhanh, lịch sử quét phiên & ghi nhận thủ công -->
+    <footer class="bg-slate-950 border-t border-slate-800 p-3 shrink-0 z-20 space-y-2">
+        <!-- Điều khiển trình chiếu từ xa -->
+        <div class="flex items-center justify-between gap-2">
+            <button onclick="sendRemoteControl('PREV_Q')" class="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-chevron-left"></i> Câu trước
+            </button>
+            <button onclick="sendRemoteControl('REVEAL')" class="flex-1 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-eye"></i> Đáp án
+            </button>
+            <button onclick="sendRemoteControl('NEXT_Q')" class="flex-1 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5">
+                Câu sau <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        </div>
+
+        <!-- Ghi nhận nhanh theo số thẻ nếu ánh sáng yếu -->
+        <div class="flex items-center gap-1.5 bg-slate-900 p-2 rounded-xl border border-slate-800">
+            <span class="text-[11px] text-slate-400 font-bold shrink-0">Chọn thẻ:</span>
+            <select id="manual-card-select" class="flex-1 bg-slate-800 text-white text-xs font-bold rounded-lg px-2 py-1.5 border border-slate-700 truncate">
+                <option value="1">#1 - Học sinh 1</option>
+            </select>
+            <button onclick="manualSendOption('A')" class="w-8 h-8 rounded-lg bg-blue-600 active:scale-95 text-white font-black text-xs">A</button>
+            <button onclick="manualSendOption('B')" class="w-8 h-8 rounded-lg bg-blue-600 active:scale-95 text-white font-black text-xs">B</button>
+            <button onclick="manualSendOption('C')" class="w-8 h-8 rounded-lg bg-blue-600 active:scale-95 text-white font-black text-xs">C</button>
+            <button onclick="manualSendOption('D')" class="w-8 h-8 rounded-lg bg-blue-600 active:scale-95 text-white font-black text-xs">D</button>
+        </div>
+
+        <!-- Lịch sử quét ngắn gọn của câu hiện tại -->
+        <div id="scan-history-strip" class="flex items-center gap-1.5 overflow-x-auto py-0.5 min-h-[24px] text-[11px] text-slate-400">
+            <span class="italic">Chưa có lượt quét xác nhận ở câu này.</span>
+        </div>
+
+        <div class="flex items-center justify-between text-[11px] text-slate-400 px-1">
+            <span>Đã quét: <b id="scanned-counter" class="text-emerald-400">0</b> thẻ</span>
+            <div class="flex items-center gap-3">
+                <button onclick="toggleTorch()" id="btn-torch" class="hidden text-amber-300 font-bold">
+                    <i class="fa-solid fa-bolt mr-1"></i>Đèn Flash
+                </button>
+                <button onclick="stopMobileCamera()" id="btn-stop-cam" class="hidden text-rose-400 font-bold">
+                    <i class="fa-solid fa-video-slash mr-1"></i>Tắt Cam
+                </button>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        /**
+         * 1. BẢNG TRA CỨU MA TRẬN 5x5 & 4 HƯỚNG XOAY (A, B, C, D) CHO THẺ 1..60
+         */
+        const VALID_OPTIONS = new Set(['A', 'B', 'C', 'D']);
+
+        function rotate90CW(matrix) {
+            const N = matrix.length;
+            const res = Array.from({ length: N }, () => Array(N).fill(0));
+            for (let r = 0; r < N; r++) {
+                for (let c = 0; c < N; c++) {
+                    res[c][N - 1 - r] = matrix[r][c];
+                }
+            }
+            return res;
+        }
+
+        function countFilledCells(matrix) {
+            let cnt = 0;
+            for (let r = 0; r < matrix.length; r++) {
+                for (let c = 0; c < matrix[r].length; c++) {
+                    if (matrix[r][c] === 1) cnt++;
+                }
+            }
+            return cnt;
+        }
+
+        function buildCardSignatureLookup() {
+            const lookup = new Map();
+            for (let cardNum = 1; cardNum <= 60; cardNum++) {
+                const seed = cardNum * 137 + 29;
+                const baseGrid = [];
+                for (let r = 0; r < 5; r++) {
+                    const row = [];
+                    for (let c = 0; c < 5; c++) {
+                        const bit = ((seed >> ((r * 5 + c) % 16)) ^ (r * 3 + c * 7)) & 1;
+                        let isFilled;
+                        if (r === 0 && c === 1) isFilled = 1;
+                        else if (r === 4 && c === 3) isFilled = 0;
+                        else if (r === 0 && c === 3) isFilled = 1;
+                        else isFilled = bit;
+                        row.push(isFilled);
+                    }
+                    baseGrid.push(row);
+                }
+
+                const ones = countFilledCells(baseGrid);
+                if (ones < 4 || ones > 21) continue;
+
+                const orientations = [
+                    { option: 'A', grid: baseGrid },
+                    { option: 'D', grid: rotate90CW(baseGrid) },
+                    { option: 'C', grid: rotate90CW(rotate90CW(baseGrid)) },
+                    { option: 'B', grid: rotate90CW(rotate90CW(rotate90CW(baseGrid))) }
+                ];
+
+                orientations.forEach(({ option, grid }) => {
+                    if (!VALID_OPTIONS.has(option)) return;
+                    const key = grid.flat().join('');
+                    if (!lookup.has(key)) {
+                        lookup.set(key, { cardNumber: cardNum, option });
+                    }
+                });
+            }
+            return lookup;
+        }
+
+        const CARD_LOOKUP = buildCardSignatureLookup();
+
+        /**
+         * 2. TRẠNG THÁI ỨNG DỤNG, LỚP TẠM THỜI (PENDING) & LỊCH SỬ CHÍNH THỨC
+         */
+        const SCAN_CONFIG = {
+            targetFps: 12,
+            requiredStableFrames: 3,
+            requiredStableMs: 220,
+            cooldownMs: 1600,
+            confirmedVisualHoldMs: 550,
+            roiSizeRatio: 0.62,
+            tileRatio: 0.52,
+            tilePositions: [0.15, 0.383, 0.617, 0.85],
+            procSize: 192,
+            minContrastStd: 18,
+            minCellContrastMargin: 12,
+            minBorderDarkRatio: 0.45
+        };
+
+        let clientPeer = null;
+        let hostConn = null;
+        let hostStudents = [];
+        let currentQuestionKey = 'Q_1';
+
+        let confirmedByCard = new Map();
+        let scanHistory = [];
+        let recentPairCooldown = new Map();
+
+        let pendingScan = null;
+        const pendingByCard = new Map();
+        let confirmedVisualUntil = 0;
+
+        const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('mathplickers_sync') : null;
+
+        function resetSessionState(reasonLabel = '') {
+            pendingScan = null;
+            pendingByCard.clear();
+            confirmedByCard.clear();
+            scanHistory = [];
+            recentPairCooldown.clear();
+            confirmedVisualUntil = 0;
+            renderConfirmedUI();
+            setRoiVisualState('idle', reasonLabel || 'Đưa các thẻ vào vùng camera • Giữ thẻ phẳng, đủ sáng và không che mã');
+        }
+
+        function renderConfirmedUI() {
+            document.getElementById('scanned-counter').textContent = String(confirmedByCard.size);
+            const strip = document.getElementById('scan-history-strip');
+            if (scanHistory.length === 0) {
+                strip.innerHTML = '<span class="italic">Chưa có lượt quét xác nhận ở câu này.</span>';
+                return;
+            }
+            strip.innerHTML = scanHistory.slice(0, 8).map(item => {
+                const st = hostStudents.find(s => Number(s.cardNumber) === Number(item.cardNumber));
+                const shortName = st ? st.name.split(' ').slice(-2).join(' ') : `#${item.cardNumber}`;
+                return `<span class="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-slate-200 font-semibold">
+                    <b class="text-emerald-400">#${item.cardNumber}</b> ${shortName} → <span class="text-amber-300 font-black">${item.option}</span>
+                </span>`;
+            }).join('');
+        }
+
+        function setRoiVisualState(mode, message) {
+            const frame = document.getElementById('roi-frame');
+            const pill = document.getElementById('roi-status-pill');
+            const corners = ['roi-tl', 'roi-tr', 'roi-bl', 'roi-br'].map(id => document.getElementById(id));
+
+            if (!frame || !pill) return;
+
+            if (mode === 'confirmed') {
+                frame.classList.add('roi-confirmed');
+                corners.forEach(c => {
+                    c.classList.remove('border-sky-400', 'border-amber-400');
+                    c.classList.add('border-emerald-400');
+                });
+                pill.className = 'mt-3 bg-emerald-950/90 backdrop-blur px-3.5 py-1 rounded-full text-xs font-bold text-emerald-300 border border-emerald-400/60';
+            } else if (mode === 'tracking') {
+                frame.classList.remove('roi-confirmed');
+                corners.forEach(c => {
+                    c.classList.remove('border-sky-400', 'border-emerald-400');
+                    c.classList.add('border-amber-400');
+                });
+                pill.className = 'mt-3 bg-amber-950/85 backdrop-blur px-3.5 py-1 rounded-full text-xs font-semibold text-amber-200 border border-amber-400/40';
+            } else {
+                frame.classList.remove('roi-confirmed');
+                corners.forEach(c => {
+                    c.classList.remove('border-amber-400', 'border-emerald-400');
+                    c.classList.add('border-sky-400');
+                });
+                pill.className = 'mt-3 bg-black/80 backdrop-blur px-3.5 py-1 rounded-full text-xs font-semibold text-slate-200 border border-white/15';
+            }
+
+            if (message) {
+                pill.textContent = message;
+            }
+        }
+
+        /**
+         * 3. KẾT NỐI PEERJS / BROADCASTCHANNEL & ĐỒNG BỘ VỚI MÁY TÍNH
+         */
+        function toggleConnectSheet() {
+            document.getElementById('connect-sheet').classList.toggle('hidden');
+        }
+
+        function updateConnectionUI(isConnected, label) {
+            const el = document.getElementById('conn-status-text');
+            if (isConnected) {
+                el.className = 'text-[11px] text-emerald-400 font-bold flex items-center gap-1';
+                el.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-pulse"></span> ${label}`;
+            } else {
+                el.className = 'text-[11px] text-amber-300 font-semibold flex items-center gap-1';
+                el.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span> ${label}`;
+            }
+        }
+
+        function connectToHostRoom() {
+            let rawCode = document.getElementById('room-code-input').value.trim().toUpperCase();
+            if (!rawCode) return;
+            if (!rawCode.startsWith('MP-')) rawCode = `MP-${rawCode}`;
+            document.getElementById('room-code-input').value = rawCode;
+            localStorage.setItem('mathplickers_last_room', rawCode);
+
+            const targetPeerId = `MATHPLICKERS-VN-${rawCode}`;
+            updateConnectionUI(false, `Đang nối tới ${rawCode}...`);
+
+            if (clientPeer) {
+                try { clientPeer.destroy(); } catch (e) {}
+                clientPeer = null;
+                hostConn = null;
+            }
+
+            if (typeof Peer !== 'undefined') {
+                clientPeer = new Peer({
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' }
+                        ]
+                    }
+                });
+
+                clientPeer.on('open', () => {
+                    hostConn = clientPeer.connect(targetPeerId, { reliable: true });
+                    hostConn.on('open', () => {
+                        updateConnectionUI(true, `Đã kết nối ${rawCode}`);
+                        document.getElementById('connect-sheet').classList.add('hidden');
+                        hostConn.send({ type: 'REQUEST_STATE' });
+                    });
+                    hostConn.on('data', (data) => handleHostStateUpdate(data));
+                    hostConn.on('close', () => {
+                        hostConn = null;
+                        updateConnectionUI(false, 'Mất kết nối máy tính');
+                    });
+                    hostConn.on('error', () => {
+                        hostConn = null;
+                        updateConnectionUI(false, 'Lỗi kết nối phòng');
+                    });
+                });
+
+                clientPeer.on('error', () => {
+                    hostConn = null;
+                    updateConnectionUI(false, 'Không tìm thấy phòng ' + rawCode);
+                });
+            }
+
+            if (syncChannel) {
+                syncChannel.postMessage({ type: 'REQUEST_STATE' });
+            }
+        }
+
+        function handleHostStateUpdate(data) {
+            if (!data || data.type !== 'HOST_STATE') return;
+
+            const nextQKey = String(data.questionKey || data.questionIndex || data.questionLabel || 'Q_1');
+            if (nextQKey !== currentQuestionKey) {
+                currentQuestionKey = nextQKey;
+                resetSessionState();
+            }
+
+            if (data.questionLabel) {
+                document.getElementById('active-question-pill').textContent = data.questionLabel;
+            }
+            if (data.className) {
+                document.getElementById('class-name-label').textContent = data.className;
+            }
+            if (Array.isArray(data.students)) {
+                hostStudents = data.students.map(s => ({
+                    ...s,
+                    cardNumber: Number(s.cardNumber)
+                }));
+                if (hostStudents.length > 0) {
+                    const sel = document.getElementById('manual-card-select');
+                    sel.innerHTML = hostStudents.map(s =>
+                        `<option value="${s.cardNumber}">#${s.cardNumber} - ${s.name}</option>`
+                    ).join('');
+                }
+                renderConfirmedUI();
+            }
+        }
+
+        if (syncChannel) {
+            syncChannel.onmessage = (e) => handleHostStateUpdate(e.data);
+        }
+
+        function broadcastPayloadToHost(payload) {
+            if (hostConn && hostConn.open) {
+                try { hostConn.send(payload); } catch (e) {}
+            }
+            if (syncChannel) {
+                try { syncChannel.postMessage(payload); } catch (e) {}
+            }
+            try {
+                localStorage.setItem('mathplickers_remote_scan', JSON.stringify(payload));
+            } catch (e) {}
+        }
+
+        /**
+         * 4. LỚP TẠM THỜI (PENDING) & GHI NHẬN CHÍNH THỨC (COMMITSCAN)
+         */
+        function evaluatePendingCandidates(candidates, now) {
+            const seen = new Map();
+            for (const candidate of candidates || []) {
+                if (!candidate || !VALID_OPTIONS.has(candidate.option) || candidate.confidence < 0.25) continue;
+                if (hostStudents.length > 0 && !hostStudents.some(st => Number(st.cardNumber) === Number(candidate.cardNumber))) continue;
+                const old = seen.get(candidate.cardNumber);
+                if (!old || candidate.confidence > old.confidence) seen.set(candidate.cardNumber, candidate);
+            }
+
+            const accepted = [];
+            for (const [cardNumber, candidate] of seen) {
+                const prev = pendingByCard.get(cardNumber);
+                const same = prev && prev.option === candidate.option && now - prev.lastSeenAt <= 700;
+                const state = same
+                    ? { ...prev, frames: prev.frames + 1, lastSeenAt: now, confidence: Math.max(prev.confidence, candidate.confidence) }
+                    : { cardNumber, option: candidate.option, confidence: candidate.confidence, frames: 1, firstSeenAt: now, lastSeenAt: now };
+                pendingByCard.set(cardNumber, state);
+
+                const elapsed = state.lastSeenAt - state.firstSeenAt;
+                const key = `${cardNumber}_${candidate.option}`;
+                const lastCommit = recentPairCooldown.get(key) || 0;
+                if (state.frames >= SCAN_CONFIG.requiredStableFrames && elapsed >= SCAN_CONFIG.requiredStableMs && now - lastCommit >= SCAN_CONFIG.cooldownMs) {
+                    accepted.push({ cardNumber, option: candidate.option });
+                    recentPairCooldown.set(key, now);
+                    pendingByCard.delete(cardNumber);
+                }
+            }
+
+            for (const [cardNumber, state] of pendingByCard) {
+                if (now - state.lastSeenAt > 700) pendingByCard.delete(cardNumber);
+            }
+
+            if (accepted.length) {
+                commitScanBatch(accepted, { source: 'camera', timestamp: now });
+            } else if (pendingByCard.size && now > confirmedVisualUntil) {
+                const states = [...pendingByCard.values()].slice(0, 3);
+                setRoiVisualState('tracking', `Đang xác thực ${pendingByCard.size} thẻ: ${states.map(x => `#${x.cardNumber} ${x.frames}/${SCAN_CONFIG.requiredStableFrames}`).join(' • ')}`);
+            }
+        }
+
+        function commitScanBatch(scans, meta = {}) {
+            const now = meta.timestamp || Date.now();
+            const validToSend = [];
+            for (const item of scans) {
+                const cardNumber = Number(item.cardNumber);
+                const option = item.option;
+                if (!Number.isInteger(cardNumber) || cardNumber < 1 || cardNumber > 60 || !VALID_OPTIONS.has(option)) continue;
+                const previous = confirmedByCard.get(cardNumber);
+                const changed = !previous || previous.option !== option;
+                confirmedByCard.set(cardNumber, { cardNumber, option, timestamp: now });
+                scanHistory.unshift({ cardNumber, option, actionType: !previous ? 'new' : changed ? 'updated' : 'reconfirmed', timestamp: now });
+                validToSend.push({ cardNumber, option, changed });
+            }
+            if (!validToSend.length) return;
+            scanHistory = scanHistory.slice(0, 50);
+            renderConfirmedUI();
+
+            const payload = {
+                type: 'PLICKERS_SCAN_BATCH',
+                scans: validToSend.map(({ cardNumber, option }) => ({ cardNumber, option })),
+                questionKey: currentQuestionKey,
+                timestamp: now
+            };
+            broadcastPayloadToHost(payload);
+
+            playBeepFeedback(880);
+            if (navigator.vibrate) { try { navigator.vibrate(45); } catch (e) {} }
+            confirmedVisualUntil = now + SCAN_CONFIG.confirmedVisualHoldMs;
+
+            const names = validToSend.slice(0, 3).map(x => {
+                const student = hostStudents.find(st => Number(st.cardNumber) === x.cardNumber);
+                return student ? student.name : `#${x.cardNumber}`;
+            });
+            setRoiVisualState('confirmed', `Đã ghi nhận ${validToSend.length} thẻ: ${names.join(', ')}${validToSend.length > 3 ? '…' : ''}`);
+            const first = validToSend[0];
+            const student = hostStudents.find(st => Number(st.cardNumber) === first.cardNumber);
+            showScanBanner(
+                first.cardNumber,
+                validToSend.length > 1 ? `${validToSend.length} học sinh đã quét` : (student ? student.name : `Học sinh thẻ #${first.cardNumber}`),
+                first.option,
+                `Đã gửi ${validToSend.length} kết quả về máy tính`
+            );
+        }
+
+        function commitScan(cardNumber, option, meta = {}) {
+            const numCard = Number(cardNumber);
+            if (!Number.isInteger(numCard) || numCard < 1 || numCard > 60 || !VALID_OPTIONS.has(option)) {
+                return false;
+            }
+
+            const now = meta.timestamp || Date.now();
+            const prevRecord = confirmedByCard.get(numCard);
+            const isNewCard = !prevRecord;
+            const isAnswerChanged = Boolean(prevRecord && prevRecord.option !== option);
+
+            confirmedByCard.set(numCard, {
+                cardNumber: numCard,
+                option,
+                timestamp: now
+            });
+
+            scanHistory.unshift({
+                cardNumber: numCard,
+                option,
+                actionType: isNewCard ? 'new' : (isAnswerChanged ? 'updated' : 'reconfirmed'),
+                timestamp: now
+            });
+            if (scanHistory.length > 50) {
+                scanHistory.length = 50;
+            }
+
+            renderConfirmedUI();
+
+            const payload = {
+                type: 'PLICKERS_SCAN',
+                cardNumber: numCard,
+                option,
+                questionKey: currentQuestionKey,
+                timestamp: now
+            };
+            broadcastPayloadToHost(payload);
+
+            playBeepFeedback(isAnswerChanged ? 660 : 880);
+            if (navigator.vibrate) {
+                try { navigator.vibrate(isAnswerChanged ? [30, 30, 30] : 50); } catch (e) {}
+            }
+
+            confirmedVisualUntil = now + SCAN_CONFIG.confirmedVisualHoldMs;
+            setRoiVisualState('confirmed', `Đã xác nhận thẻ #${numCard} • Đáp án ${option}`);
+
+            const st = hostStudents.find(s => Number(s.cardNumber) === numCard);
+            const subText = isAnswerChanged
+                ? `Đã đổi từ ${prevRecord.option} → ${option} & gửi máy tính`
+                : 'Đã xác nhận & gửi về máy tính';
+            showScanBanner(numCard, st ? st.name : `Học sinh thẻ #${numCard}`, option, subText);
+            return true;
+        }
+
+        function sendRemoteControl(action) {
+            broadcastPayloadToHost({ type: 'REMOTE_CONTROL', action });
+        }
+
+        function manualSendOption(opt) {
+            const cardNum = parseInt(document.getElementById('manual-card-select').value, 10);
+            if (!Number.isNaN(cardNum) && VALID_OPTIONS.has(opt)) {
+                recentPairCooldown.set(`${cardNum}_${opt}`, Date.now());
+                commitScan(cardNum, opt, { source: 'manual', timestamp: Date.now() });
+            }
+        }
+
+        let bannerTimer = null;
+        function showScanBanner(cardNum, name, option, subText = 'Đã xác nhận & gửi về máy tính') {
+            const banner = document.getElementById('last-scan-banner');
+            document.getElementById('banner-card-num').textContent = `#${cardNum}`;
+            document.getElementById('banner-student-name').textContent = name;
+            document.getElementById('banner-sub-status').textContent = subText;
+            document.getElementById('banner-option').textContent = option;
+            banner.classList.remove('hidden');
+
+            clearTimeout(bannerTimer);
+            bannerTimer = setTimeout(() => {
+                banner.classList.add('hidden');
+            }, 2200);
+        }
+
+        function playBeepFeedback(freq = 880) {
+            try {
+                const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                if (!AudioCtx) return;
+                const ctx = new AudioCtx();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(freq, ctx.currentTime);
+                gain.gain.setValueAtTime(0.08, ctx.currentTime);
+                osc.connect(gain);
+                gain.connect(ctx.destination);
+                osc.start();
+                osc.stop(ctx.currentTime + 0.085);
+                osc.onended = () => {
+                    try { ctx.close(); } catch (e) {}
+                };
+            } catch (e) {}
+        }
+
+        /**
+         * 5. QUẢN LÝ CAMERA, THROTTLE (~12 FPS) & GIẢI MÃ MA TRẬN 5x5 + HƯỚNG XOAY
+         */
+        let mediaStream = null;
+        let cameraTrack = null;
+        let torchOn = false;
+        let scanLoopActive = false;
+        let loopTimerId = null;
+        let lastProcessAt = 0;
+
+        async function startMobileCamera() {
+            const video = document.getElementById('mobile-video');
+            stopMobileCamera(false);
+            resetSessionState('Đang khởi động camera...');
+
+            try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    throw new DOMException('Trình duyệt không hỗ trợ camera hoặc trang chưa chạy HTTPS.', 'NotSupportedError');
+                }
+                let stream;
+                const preferred = {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 20, max: 30 }
+                };
+                try {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: preferred, audio: false });
+                } catch (firstError) {
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+                }
+
+                mediaStream = stream;
+                video.srcObject = stream;
+                await video.play();
+
+                await new Promise(resolve => {
+                    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+                        resolve();
+                    } else {
+                        const onReady = () => {
+                            if (video.videoWidth > 0) {
+                                video.removeEventListener('loadedmetadata', onReady);
+                                video.removeEventListener('canplay', onReady);
+                                resolve();
+                            }
+                        };
+                        video.addEventListener('loadedmetadata', onReady);
+                        video.addEventListener('canplay', onReady);
+                        setTimeout(resolve, 400);
+                    }
+                });
+
+                cameraTrack = stream.getVideoTracks()[0] || null;
+                if (cameraTrack && cameraTrack.applyConstraints) {
+                    try {
+                        await cameraTrack.applyConstraints({
+                            advanced: [{ focusMode: 'continuous' }, { exposureMode: 'continuous' }, { whiteBalanceMode: 'continuous' }]
+                        });
+                    } catch (e) {}
+                }
+
+                if (cameraTrack && cameraTrack.getCapabilities) {
+                    const caps = cameraTrack.getCapabilities();
+                    if (caps && caps.torch) {
+                        document.getElementById('btn-torch').classList.remove('hidden');
+                    }
+                }
+
+                document.getElementById('btn-stop-cam').classList.remove('hidden');
+                document.getElementById('camera-start-overlay').classList.add('hidden');
+
+                scanLoopActive = true;
+                lastProcessAt = 0;
+                setRoiVisualState('idle', 'Đang quét trực tiếp • Đưa thẻ vào vùng camera');
+                scheduleNextScanTick();
+            } catch (err) {
+                scanLoopActive = false;
+                if (mediaStream) {
+                    mediaStream.getTracks().forEach(track => { try { track.stop(); } catch (e) {} });
+                    mediaStream = null;
+                }
+                video.srcObject = null;
+                const reason = err && err.name === 'NotAllowedError'
+                    ? 'Bạn chưa cấp quyền camera.'
+                    : err && err.name === 'NotFoundError'
+                        ? 'Không tìm thấy camera trên thiết bị.'
+                        : err && err.name === 'NotReadableError'
+                            ? 'Camera đang được ứng dụng khác sử dụng.'
+                            : err && err.name === 'NotSupportedError'
+                                ? 'Trình duyệt không hỗ trợ camera hoặc trang chưa chạy HTTPS.'
+                                : err && err.name === 'OverconstrainedError'
+                                    ? 'Camera không đáp ứng cấu hình yêu cầu.'
+                                    : 'Trình duyệt không mở được camera.';
+                const pill = document.getElementById('roi-status-pill');
+                if (pill) pill.textContent = `${reason} Hãy dùng HTTPS, cấp quyền camera rồi thử lại.`;
+                document.getElementById('camera-start-overlay').classList.remove('hidden');
+            }
+        }
+
+        function stopMobileCamera(showStartOverlay = true) {
+            scanLoopActive = false;
+            if (loopTimerId !== null) {
+                clearTimeout(loopTimerId);
+                loopTimerId = null;
+            }
+
+            const video = document.getElementById('mobile-video');
+            if (video) {
+                try { video.pause(); } catch (e) {}
+                video.srcObject = null;
+            }
+
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => {
+                    try { track.stop(); } catch (e) {}
+                });
+                mediaStream = null;
+            }
+            cameraTrack = null;
+            torchOn = false;
+
+            const procCanvas = document.getElementById('proc-canvas');
+            if (procCanvas) {
+                const pctx = procCanvas.getContext('2d');
+                if (pctx) pctx.clearRect(0, 0, procCanvas.width, procCanvas.height);
+                procCanvas.width = 0;
+                procCanvas.height = 0;
+            }
+
+            document.getElementById('btn-torch').classList.add('hidden');
+            document.getElementById('btn-stop-cam').classList.add('hidden');
+            resetSessionState();
+            pendingByCard.clear();
+
+            if (showStartOverlay) {
+                document.getElementById('camera-start-overlay').classList.remove('hidden');
+            }
+        }
+
+        async function toggleTorch() {
+            if (!cameraTrack) return;
+            torchOn = !torchOn;
+            try {
+                await cameraTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+            } catch (e) {
+                torchOn = !torchOn;
+            }
+        }
+
+        function scheduleNextScanTick() {
+            if (!scanLoopActive) return;
+            const frameIntervalMs = Math.round(1000 / SCAN_CONFIG.targetFps);
+            const now = performance.now();
+            const elapsed = now - lastProcessAt;
+            const delay = elapsed >= frameIntervalMs ? 0 : (frameIntervalMs - elapsed);
+
+            loopTimerId = setTimeout(() => {
+                loopTimerId = null;
+                if (!scanLoopActive) return;
+                lastProcessAt = performance.now();
+                runScanStep();
+                scheduleNextScanTick();
+            }, delay);
+        }
+
+        function isVideoFrameReady(video) {
+            return (
+                video &&
+                !video.paused &&
+                !video.ended &&
+                video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+                video.videoWidth >= 120 &&
+                video.videoHeight >= 120
+            );
+        }
+
+        function runScanStep() {
+            const video = document.getElementById('mobile-video');
+            const now = Date.now();
+            if (!isVideoFrameReady(video)) {
+                if (scanLoopActive && now > confirmedVisualUntil) {
+                    setRoiVisualState('idle', 'Đang chờ luồng khung hình từ camera...');
+                }
+                return;
+            }
+            const candidates = decodePlickersCandidatesFromFrame(video);
+            evaluatePendingCandidates(candidates, now);
+            if (!candidates.length && !pendingByCard.size && now > confirmedVisualUntil) {
+                setRoiVisualState('idle', 'Đưa 1 hoặc nhiều thẻ vào vùng camera • Giữ thẻ phẳng, đủ sáng');
+            }
+        }
+
+        function decodePlickersCandidatesFromFrame(video) {
+            const vw = video.videoWidth, vh = video.videoHeight;
+            const side = Math.floor(Math.min(vw, vh) * SCAN_CONFIG.tileRatio);
+            const found = new Map();
+
+            // Thêm cửa sổ trung tâm lớn để bắt thẻ rõ nét ở giữa khung hình
+            const centerSide = Math.floor(Math.min(vw, vh) * 0.72);
+            const centerCandidate = decodePlickersCandidateFromCrop(
+                video,
+                Math.max(0, Math.floor((vw - centerSide) / 2)),
+                Math.max(0, Math.floor((vh - centerSide) / 2)),
+                centerSide
+            );
+            if (centerCandidate) {
+                found.set(centerCandidate.cardNumber, centerCandidate);
+            }
+
+            for (const cyRatio of SCAN_CONFIG.tilePositions) {
+                for (const cxRatio of SCAN_CONFIG.tilePositions) {
+                    const sx = Math.max(0, Math.min(vw - side, Math.floor(vw * cxRatio - side / 2)));
+                    const sy = Math.max(0, Math.min(vh - side, Math.floor(vh * cyRatio - side / 2)));
+                    const candidate = decodePlickersCandidateFromCrop(video, sx, sy, side);
+                    if (candidate) {
+                        const prev = found.get(candidate.cardNumber);
+                        if (!prev || candidate.confidence > prev.confidence) found.set(candidate.cardNumber, candidate);
+                    }
+                }
+            }
+            return [...found.values()];
+        }
+
+        function computeFrameQualityStats(gray, totalPixels) {
+            if (!gray || totalPixels <= 0) {
+                return { mean: 0, std: 0, min: 0, max: 255, isAcceptable: false };
+            }
+            let sum = 0, minVal = 255, maxVal = 0;
+            for (let i = 0; i < totalPixels; i++) {
+                const v = gray[i];
+                sum += v;
+                if (v < minVal) minVal = v;
+                if (v > maxVal) maxVal = v;
+            }
+            const mean = sum / totalPixels;
+
+            let sqDiffSum = 0;
+            for (let i = 0; i < totalPixels; i++) {
+                const diff = gray[i] - mean;
+                sqDiffSum += diff * diff;
+            }
+            const std = Math.sqrt(sqDiffSum / totalPixels);
+
+            const isAcceptable = mean >= 15 && mean <= 248 && std >= SCAN_CONFIG.minContrastStd && (maxVal - minVal) >= 35;
+            return { mean, std, min: minVal, max: maxVal, isAcceptable };
+        }
+
+        function decodePlickersCandidateFromCrop(video, sx, sy, cropSize) {
+            const procCanvas = document.getElementById('proc-canvas');
+            const ctx = procCanvas.getContext('2d', { willReadFrequently: true });
+            if (!ctx) return null;
+            const S = SCAN_CONFIG.procSize;
+            procCanvas.width = S;
+            procCanvas.height = S;
+            ctx.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, S, S);
+            let gray = null;
+            try {
+                const px = ctx.getImageData(0, 0, S, S).data;
+                gray = new Uint8Array(S * S);
+                for (let i = 0; i < S * S; i++) {
+                    gray[i] = (px[i * 4] * 77 + px[i * 4 + 1] * 150 + px[i * 4 + 2] * 29) >> 8;
+                }
+                const quality = computeFrameQualityStats(gray, S * S);
+                if (!quality.isAcceptable) return null;
+
+                const adaptiveThreshold = Math.max(
+                    30,
+                    Math.min(215, (quality.min + quality.max) * 0.48)
+                );
+                const box = locateCardBorderBox(gray, S, adaptiveThreshold);
+                if (!box) return null;
+
+                const w = box.maxX - box.minX;
+                const h = box.maxY - box.minY;
+                if (w < 36 || h < 36 || w > S * 0.96 || h > S * 0.96) return null;
+
+                const aspect = w / h;
+                if (aspect < 0.72 || aspect > 1.38 || !hasValidOuterBorder(gray, S, box, adaptiveThreshold)) {
+                    return null;
+                }
+
+                const matrixSample = sample5x5Matrix(gray, S, box);
+                if (!matrixSample || matrixSample.margin < SCAN_CONFIG.minCellContrastMargin) return null;
+
+                const match = CARD_LOOKUP.get(matrixSample.bits.join(''));
+                if (!match || !VALID_OPTIONS.has(match.option)) return null;
+
+                const orientationScore = evaluateOrientationClarity(gray, S, box, match.option, matrixSample.cellThreshold);
+                if (orientationScore < 0.32) return null;
+
+                return {
+                    cardNumber: match.cardNumber,
+                    option: match.option,
+                    confidence: Math.min(1, matrixSample.margin / 60) * Math.max(0.5, orientationScore)
+                };
+            } catch (error) {
+                return null;
+            } finally {
+                gray = null;
+                ctx.clearRect(0, 0, S, S);
+            }
+        }
+
+        function locateCardBorderBox(gray, S, threshold) {
+            const margin = 4;
+            const rowDarkCounts = new Int32Array(S);
+            const colDarkCounts = new Int32Array(S);
+
+            for (let y = margin; y < S - margin; y++) {
+                let rCount = 0;
+                for (let x = margin; x < S - margin; x++) {
+                    if (gray[y * S + x] < threshold) {
+                        rCount++;
+                        colDarkCounts[x]++;
+                    }
+                }
+                rowDarkCounts[y] = rCount;
+            }
+
+            let minY = -1, maxY = -1;
+            for (let y = margin; y < S - margin; y++) {
+                if (rowDarkCounts[y] >= 18) {
+                    if (minY === -1) minY = y;
+                    maxY = y;
+                }
+            }
+
+            let minX = -1, maxX = -1;
+            for (let x = margin; x < S - margin; x++) {
+                if (colDarkCounts[x] >= 18) {
+                    if (minX === -1) minX = x;
+                    maxX = x;
+                }
+            }
+
+            if (minX === -1 || maxX <= minX || minY === -1 || maxY <= minY) {
+                return null;
+            }
+
+            return { minX, maxX, minY, maxY };
+        }
+
+        function hasValidOuterBorder(gray, S, box, threshold) {
+            const { minX, maxX, minY, maxY } = box;
+            const w = maxX - minX;
+            const h = maxY - minY;
+            const band = Math.max(2, Math.round(Math.min(w, h) * 0.07));
+
+            let topDark = 0, topTotal = 0;
+            let botDark = 0, botTotal = 0;
+            let leftDark = 0, leftTotal = 0;
+            let rightDark = 0, rightTotal = 0;
+
+            for (let x = minX; x <= maxX; x++) {
+                for (let b = 0; b < band; b++) {
+                    const ty = Math.min(S - 1, minY + b);
+                    const by = Math.max(0, maxY - b);
+                    if (gray[ty * S + x] < threshold) topDark++;
+                    if (gray[by * S + x] < threshold) botDark++;
+                    topTotal++;
+                    botTotal++;
+                }
+            }
+
+            for (let y = minY; y <= maxY; y++) {
+                for (let b = 0; b < band; b++) {
+                    const lx = Math.min(S - 1, minX + b);
+                    const rx = Math.max(0, maxX - b);
+                    if (gray[y * S + lx] < threshold) leftDark++;
+                    if (gray[y * S + rx] < threshold) rightDark++;
+                    leftTotal++;
+                    rightTotal++;
+                }
+            }
+
+            const minRatio = SCAN_CONFIG.minBorderDarkRatio;
+            return (
+                topDark / Math.max(1, topTotal) >= minRatio &&
+                botDark / Math.max(1, botTotal) >= minRatio &&
+                leftDark / Math.max(1, leftTotal) >= minRatio &&
+                rightDark / Math.max(1, rightTotal) >= minRatio
+            );
+        }
+
+        function sample5x5Matrix(gray, S, box) {
+            const w = box.maxX - box.minX;
+            const h = box.maxY - box.minY;
+            const matX0 = box.minX + w * 0.225;
+            const matY0 = box.minY + h * 0.225;
+            const matW = w * 0.55;
+            const matH = h * 0.55;
+
+            const cellAvgs = [];
+            let minCell = 255, maxCell = 0;
+
+            for (let r = 0; r < 5; r++) {
+                for (let c = 0; c < 5; c++) {
+                    const cx = Math.floor(matX0 + (c + 0.5) * (matW / 5));
+                    const cy = Math.floor(matY0 + (r + 0.5) * (matH / 5));
+
+                    let cellSum = 0;
+                    let samples = 0;
+                    for (let dy = -1; dy <= 1; dy++) {
+                        for (let dx = -1; dx <= 1; dx++) {
+                            const px = Math.min(S - 1, Math.max(0, cx + dx));
+                            const py = Math.min(S - 1, Math.max(0, cy + dy));
+                            cellSum += gray[py * S + px];
+                            samples++;
+                        }
+                    }
+
+                    const avg = cellSum / samples;
+                    cellAvgs.push(avg);
+                    if (avg < minCell) minCell = avg;
+                    if (avg > maxCell) maxCell = avg;
+                }
+            }
+
+            const cellThreshold = (minCell + maxCell) * 0.5;
+            const bits = [];
+            let darkSum = 0, darkCount = 0;
+            let lightSum = 0, lightCount = 0;
+
+            for (let i = 0; i < cellAvgs.length; i++) {
+                const avg = cellAvgs[i];
+                if (avg < cellThreshold) {
+                    bits.push(1);
+                    darkSum += avg;
+                    darkCount++;
+                } else {
+                    bits.push(0);
+                    lightSum += avg;
+                    lightCount++;
+                }
+            }
+
+            if (darkCount < 3 || lightCount < 3) {
+                return null;
+            }
+
+            const avgDark = darkSum / darkCount;
+            const avgLight = lightSum / lightCount;
+            const margin = avgLight - avgDark;
+
+            return { bits, margin, cellThreshold };
+        }
+
+        function evaluateOrientationClarity(gray, S, box, option, threshold) {
+            if (!VALID_OPTIONS.has(option)) return 0;
+            const w = box.maxX - box.minX;
+            const h = box.maxY - box.minY;
+            const innerY = Math.min(S - 1, box.minY + Math.max(2, Math.round(h * 0.08)));
+
+            let innerDark = 0;
+            let steps = 0;
+
+            const startX = box.minX + Math.round(w * 0.2);
+            const endX = box.maxX - Math.round(w * 0.2);
+            for (let x = startX; x <= endX; x += 2) {
+                if (gray[innerY * S + x] < threshold) innerDark++;
+                steps++;
+            }
+
+            if (steps <= 0) return 0;
+            return Math.min(1, (innerDark / steps) * 1.15);
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden && scanLoopActive) stopMobileCamera(true);
+        });
+        window.addEventListener('beforeunload', () => {
+            stopMobileCamera(false);
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            resetSessionState();
+            const params = new URLSearchParams(window.location.search);
+            const urlRoom = params.get('room');
+            const savedRoom = localStorage.getItem('mathplickers_last_room');
+            const initialRoom = urlRoom || savedRoom || '';
+            if (initialRoom) {
+                document.getElementById('room-code-input').value = initialRoom;
+                connectToHostRoom();
+            }
+        });
+    </script>
+</body>
+</html>
