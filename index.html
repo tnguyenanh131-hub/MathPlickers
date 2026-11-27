@@ -661,6 +661,8 @@
                             <option value="none">Không có hình vẽ</option>
                             <option value="graph">Vẽ đồ thị hàm số y = f(x)</option>
                             <option value="svg">Hình vẽ hình học (Mã SVG)</option>
+                            <option value="table">Bảng số liệu / bảng biến thiên (JSON)</option>
+                            <option value="image">Ảnh minh họa (URL)</option>
                         </select>
                     </div>
                 </div>
@@ -671,6 +673,15 @@
                         <input type="text" id="q-graph-expr" placeholder="Ví dụ: x**3 - 3*x + 1" class="flex-1 border border-blue-300 rounded-xl px-3 py-2 text-sm font-mono bg-white">
                         <input type="text" id="q-visual-caption" placeholder="Chú thích đồ thị (VD: Đồ thị hàm số y = x³ - 3x + 1)" class="flex-1 border border-blue-300 rounded-xl px-3 py-2 text-sm bg-white">
                     </div>
+                </div>
+
+                <div id="visual-field-table" class="hidden bg-emerald-50/70 p-4 rounded-xl border border-emerald-200 space-y-2">
+                    <label class="block text-xs font-bold text-emerald-900">Dữ liệu bảng dạng JSON (mỗi hàng là một mảng; hỗ trợ LaTeX trong từng ô)</label>
+                    <textarea id="q-table-data" rows="4" placeholder='[["x", "-∞", "0", "+∞"], ["f′(x)", "+", "0", "−"]]' class="w-full border border-emerald-300 rounded-xl px-3 py-2 text-xs font-mono bg-white"></textarea>
+                </div>
+                <div id="visual-field-image" class="hidden bg-amber-50/70 p-4 rounded-xl border border-amber-200 space-y-2">
+                    <label class="block text-xs font-bold text-amber-900">Đường dẫn ảnh HTTPS (PNG, JPG, SVG hoặc WebP)</label>
+                    <input id="q-image-url" type="url" placeholder="https://..." class="w-full border border-amber-300 rounded-xl px-3 py-2 text-sm bg-white">
                 </div>
 
                 <div id="visual-field-svg" class="hidden bg-indigo-50/70 p-4 rounded-xl border border-indigo-200 space-y-2">
@@ -1199,7 +1210,15 @@
                             { left: '\\(', right: '\\)', display: false },
                             { left: '\\[', right: '\\]', display: true }
                         ],
-                        throwOnError: false
+                        throwOnError: false,
+                        strict: 'warn',
+                        trust: false,
+                        errorColor: '#b91c1c',
+                        macros: {
+                            '\\R': '\\mathbb{R}', '\\N': '\\mathbb{N}',
+                            '\\Z': '\\mathbb{Z}', '\\Q': '\\mathbb{Q}',
+                            '\\C': '\\mathbb{C}'
+                        }
                     });
                 } catch (err) {
                     console.warn('KaTeX render warning:', err);
@@ -1208,6 +1227,21 @@
                 // Thử lại nếu script KaTeX tải chậm
                 setTimeout(() => renderMathInElementSafe(element), 250);
             }
+        }
+
+        // Biên dịch biểu thức đồ thị theo danh sách ký tự/hàm cho phép; không thực thi mã tùy ý.
+        function compileSafeGraphExpression(source) {
+            const allowed = /^(?:[0-9xXeEpiPI+\-*/%^().,\s]|sqrt|sin|cos|tan|asin|acos|atan|abs|log|ln|exp|floor|ceil|round|Math\.)+$/i;
+            let expr = String(source || '').trim().replace(/\^/g, '**');
+            if (!expr || !allowed.test(expr)) throw new Error('Biểu thức chứa ký tự hoặc hàm không hỗ trợ');
+            expr = expr.replace(/Math\./g, '').replace(/\bpi\b/gi, 'PI').replace(/\bln\s*\(/gi, 'log(').replace(/\be\b/gi, 'E');
+            const names = ['sqrt','sin','cos','tan','asin','acos','atan','abs','log','exp','floor','ceil','round','PI','E','x'];
+            const identifiers = expr.match(/[A-Za-z_][A-Za-z0-9_]*/g) || [];
+            if (identifiers.some(n => !names.includes(n))) throw new Error('Tên hàm không hợp lệ');
+            // Chỉ các tên/hàm đã whitelist mới được đưa vào biểu thức.
+            const body = `"use strict"; const {sqrt,sin,cos,tan,asin,acos,atan,abs,log,exp,floor,ceil,round,PI,E}=Math; return (${expr});`;
+            const compiled = new Function('x', body);
+            return x => compiled(x);
         }
 
         /**
@@ -1289,8 +1323,7 @@
 
             let fn;
             try {
-                const normalizedExpr = exprString.replace(/\^/g, '**');
-                fn = new Function('x', `return ${normalizedExpr};`);
+                fn = compileSafeGraphExpression(exprString);
             } catch (e) {
                 ctx.fillStyle = '#ef4444';
                 ctx.font = '12px Inter, sans-serif';
@@ -1361,6 +1394,24 @@
         /**
          * 6. LOGIC TAB 1: TRÌNH CHIẾU & QUÉT THẺ TRỰC TIẾP
          */
+        function escapeHTML(value) { return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+        function escapeAttribute(value) { return escapeHTML(value); }
+        function safeHttpsUrl(value) { try { const u = new URL(value, location.href); return u.protocol === 'https:' ? u.href : ''; } catch { return ''; } }
+        function sanitizeSVGMarkup(markup) {
+            const doc = new DOMParser().parseFromString(String(markup), 'image/svg+xml');
+            if (doc.querySelector('parsererror')) return '<p class="text-rose-600">Mã SVG không hợp lệ.</p>';
+            doc.querySelectorAll('script,foreignObject,iframe,object,embed,audio,video').forEach(n => n.remove());
+            doc.querySelectorAll('*').forEach(el => [...el.attributes].forEach(a => {
+                const n = a.name.toLowerCase(), v = a.value.trim();
+                if (n.startsWith('on') || ((n === 'href' || n.endsWith(':href')) && !v.startsWith('#') && !v.startsWith('data:image/'))) el.removeAttribute(a.name);
+            }));
+            return new XMLSerializer().serializeToString(doc.documentElement);
+        }
+        function renderMathTable(rows) {
+            if (!Array.isArray(rows) || rows.length > 20 || rows.some(r => !Array.isArray(r) || r.length > 12)) return '<p class="text-rose-600">Bảng không hợp lệ (tối đa 20 hàng × 12 cột).</p>';
+            return `<div class="overflow-x-auto"><table class="min-w-full border-collapse bg-white text-center text-sm">${rows.map((r,i)=>`<tr>${r.map(c=>`<${i===0?'th':'td'} class="border border-slate-300 px-3 py-2 ${i===0?'bg-slate-100 font-bold':''}">${escapeHTML(c)}</${i===0?'th':'td'}>`).join('')}</tr>`).join('')}</table></div>`;
+        }
+
         function renderLiveClassroom() {
             if (questions.length === 0) {
                 document.getElementById('live-question-text').innerHTML = '<p class="text-slate-400 italic">Ngân hàng câu hỏi đang trống. Vui lòng thêm câu hỏi ở Tab 2.</p>';
@@ -1383,7 +1434,7 @@
             document.getElementById('live-total-students').textContent = students.length;
 
             const qTextEl = document.getElementById('live-question-text');
-            qTextEl.innerHTML = q.text;
+            qTextEl.textContent = q.text;
 
             const visualContainer = document.getElementById('live-visual-container');
             const graphCanvas = document.getElementById('live-graph-canvas');
@@ -1408,7 +1459,18 @@
                 layoutGrid.classList.add('lg:grid-cols-2');
                 toggleVisualBtn.classList.remove('hidden');
                 toggleVisualBtn.classList.add('flex');
-                svgContainer.innerHTML = q.svgCode;
+                svgContainer.innerHTML = sanitizeSVGMarkup(q.svgCode);
+                visualCaption.textContent = q.visualCaption || 'Hình minh họa bài toán';
+            } else if (q.visualType === 'table' && Array.isArray(q.tableData)) {
+                visualContainer.classList.remove('hidden'); graphCanvas.classList.add('hidden'); svgContainer.classList.remove('hidden');
+                layoutGrid.classList.add('lg:grid-cols-2'); toggleVisualBtn.classList.remove('hidden'); toggleVisualBtn.classList.add('flex');
+                svgContainer.innerHTML = renderMathTable(q.tableData);
+                visualCaption.textContent = q.visualCaption || 'Bảng số liệu / bảng biến thiên';
+            } else if (q.visualType === 'image' && q.imageUrl) {
+                visualContainer.classList.remove('hidden'); graphCanvas.classList.add('hidden'); svgContainer.classList.remove('hidden');
+                layoutGrid.classList.add('lg:grid-cols-2'); toggleVisualBtn.classList.remove('hidden'); toggleVisualBtn.classList.add('flex');
+                const safeUrl = safeHttpsUrl(q.imageUrl);
+                svgContainer.innerHTML = safeUrl ? `<img src="${escapeAttribute(safeUrl)}" alt="${escapeAttribute(q.visualCaption || 'Hình minh họa')}" class="max-w-full max-h-80 mx-auto rounded-xl object-contain" loading="lazy">` : '<p class="text-rose-600">URL ảnh không hợp lệ. Chỉ chấp nhận HTTPS.</p>';
                 visualCaption.textContent = q.visualCaption || 'Hình minh họa bài toán';
             } else {
                 visualContainer.classList.add('hidden');
@@ -1418,12 +1480,12 @@
             }
 
             ['A', 'B', 'C', 'D'].forEach(opt => {
-                document.getElementById(`live-opt-${opt}`).innerHTML = q.options[opt] || '';
+                document.getElementById(`live-opt-${opt}`).textContent = q.options[opt] || '';
                 const card = document.getElementById(`opt-card-${opt}`);
                 card.className = 'option-box border-2 border-slate-200 rounded-2xl p-4 flex items-center gap-4 bg-white transition-all';
             });
 
-            document.getElementById('live-explanation-text').innerHTML = q.explanation || 'Chưa có lời giải chi tiết cho câu hỏi này.';
+            document.getElementById('live-explanation-text').textContent = q.explanation || 'Chưa có lời giải chi tiết cho câu hỏi này.';
 
             const chartPanel = document.getElementById('live-chart-panel');
             const expBox = document.getElementById('live-explanation-box');
@@ -1713,6 +1775,8 @@
                 let visualBadge = '';
                 if (q.visualType === 'graph') visualBadge = `<span class="bg-blue-100 text-blue-800 text-[11px] font-bold px-2 py-0.5 rounded-md"><i class="fa-solid fa-chart-line mr-1"></i>Đồ thị hàm số</span>`;
                 if (q.visualType === 'svg') visualBadge = `<span class="bg-purple-100 text-purple-800 text-[11px] font-bold px-2 py-0.5 rounded-md"><i class="fa-solid fa-draw-polygon mr-1"></i>Hình vẽ SVG</span>`;
+                if (q.visualType === 'table') visualBadge = `<span class="bg-emerald-100 text-emerald-800 text-[11px] font-bold px-2 py-0.5 rounded-md">Bảng</span>`;
+                if (q.visualType === 'image') visualBadge = `<span class="bg-amber-100 text-amber-800 text-[11px] font-bold px-2 py-0.5 rounded-md">Ảnh</span>`;
 
                 return `
                     <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 flex flex-col justify-between hover:border-blue-300 transition">
@@ -1720,14 +1784,14 @@
                             <div class="flex items-center justify-between gap-2 mb-3">
                                 <div class="flex items-center gap-2 flex-wrap">
                                     <span class="bg-slate-800 text-white text-xs font-extrabold px-2.5 py-1 rounded-lg">Câu ${realIdx + 1}</span>
-                                    <span class="bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-lg">${q.topic}</span>
+                                    <span class="bg-indigo-50 text-indigo-700 text-xs font-semibold px-2.5 py-1 rounded-lg">${escapeHTML(q.topic)}</span>
                                     ${visualBadge}
                                 </div>
                                 <div class="flex items-center gap-1">
                                     <button onclick="presentSingleQuestion(${realIdx})" class="px-2.5 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold transition" title="Trình chiếu câu này ngay">
                                         <i class="fa-solid fa-play mr-1"></i>Chiếu
                                     </button>
-                                    <button onclick="openQuestionModal('${q.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 transition" title="Sửa câu hỏi">
+                                    <button onclick="openQuestionModal(${escapeHTML(JSON.stringify(q.id))})" class="p-1.5 rounded-lg bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 transition" title="Sửa câu hỏi">
                                         <i class="fa-solid fa-pen-to-square"></i>
                                     </button>
                                     <button onclick="deleteQuestion('${q.id}')" class="p-1.5 rounded-lg bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 transition" title="Xóa câu hỏi">
@@ -1736,14 +1800,14 @@
                                 </div>
                             </div>
 
-                            <div class="text-slate-900 font-medium text-sm sm:text-base mb-3 leading-relaxed">${q.text}</div>
+                            <div class="text-slate-900 font-medium text-sm sm:text-base mb-3 leading-relaxed">${escapeHTML(q.text)}</div>
 
                             <div class="grid grid-cols-2 gap-2 text-xs sm:text-sm">
                                 ${['A', 'B', 'C', 'D'].map(opt => {
                                     const isCorrect = q.correct === opt;
                                     return `
                                         <div class="p-2 rounded-xl border ${isCorrect ? 'bg-emerald-50 border-emerald-400 font-bold text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-700'}">
-                                            <span class="font-extrabold mr-1">${opt}.</span> ${q.options[opt]}
+                                            <span class="font-extrabold mr-1">${opt}.</span> ${escapeHTML(q.options[opt])}
                                         </div>
                                     `;
                                 }).join('')}
@@ -1785,6 +1849,8 @@
                 document.getElementById('q-graph-expr').value = q.graphExpr || '';
                 document.getElementById('q-visual-caption').value = q.visualCaption || '';
                 document.getElementById('q-svg-code').value = q.svgCode || '';
+                document.getElementById('q-table-data').value = JSON.stringify(q.tableData || [], null, 2);
+                document.getElementById('q-image-url').value = q.imageUrl || '';
                 document.getElementById('q-text').value = q.text;
                 document.getElementById('q-opt-A').value = q.options.A;
                 document.getElementById('q-opt-B').value = q.options.B;
@@ -1800,6 +1866,8 @@
                 document.getElementById('q-graph-expr').value = '';
                 document.getElementById('q-visual-caption').value = '';
                 document.getElementById('q-svg-code').value = '';
+                document.getElementById('q-table-data').value = '';
+                document.getElementById('q-image-url').value = '';
                 document.getElementById('q-text').value = '';
                 document.getElementById('q-opt-A').value = '';
                 document.getElementById('q-opt-B').value = '';
@@ -1823,6 +1891,8 @@
             const vType = document.getElementById('q-visual-type').value;
             document.getElementById('visual-field-graph').classList.toggle('hidden', vType !== 'graph');
             document.getElementById('visual-field-svg').classList.toggle('hidden', vType !== 'svg');
+            document.getElementById('visual-field-table').classList.toggle('hidden', vType !== 'table');
+            document.getElementById('visual-field-image').classList.toggle('hidden', vType !== 'image');
         }
 
         function fillPresetSVG(type) {
@@ -1865,12 +1935,12 @@
             }
 
             previewBox.innerHTML = `
-                <div class="font-semibold mb-2">${qText}</div>
+                <div class="font-semibold mb-2">${escapeHTML(qText)}</div>
                 <div class="grid grid-cols-2 gap-2 text-sm text-slate-700">
-                    <div><b>A.</b> ${optA}</div>
-                    <div><b>B.</b> ${optB}</div>
-                    <div><b>C.</b> ${optC}</div>
-                    <div><b>D.</b> ${optD}</div>
+                    <div><b>A.</b> ${escapeHTML(optA)}</div>
+                    <div><b>B.</b> ${escapeHTML(optB)}</div>
+                    <div><b>C.</b> ${escapeHTML(optC)}</div>
+                    <div><b>D.</b> ${escapeHTML(optD)}</div>
                 </div>
             `;
             renderMathInElementSafe(previewBox);
@@ -1889,6 +1959,14 @@
                 return;
             }
 
+            let tableData = [];
+            if (document.getElementById('q-visual-type').value === 'table') {
+                try { tableData = JSON.parse(document.getElementById('q-table-data').value || '[]'); }
+                catch { showToast('Dữ liệu bảng phải là JSON hợp lệ.', 'error'); return; }
+                if (!Array.isArray(tableData) || tableData.length > 20 || tableData.some(r => !Array.isArray(r) || r.length > 12)) { showToast('Bảng tối đa 20 hàng × 12 cột.', 'error'); return; }
+            }
+            const imageUrl = document.getElementById('q-image-url').value.trim();
+            if (document.getElementById('q-visual-type').value === 'image' && !safeHttpsUrl(imageUrl)) { showToast('Ảnh phải có đường dẫn HTTPS hợp lệ.', 'error'); return; }
             const newQuestionObj = {
                 id: editId || `q_${Date.now()}`,
                 topic: document.getElementById('q-topic').value,
@@ -1899,6 +1977,8 @@
                 visualType: document.getElementById('q-visual-type').value,
                 graphExpr: document.getElementById('q-graph-expr').value.trim(),
                 svgCode: document.getElementById('q-svg-code').value.trim(),
+                tableData,
+                imageUrl,
                 visualCaption: document.getElementById('q-visual-caption').value.trim()
             };
 

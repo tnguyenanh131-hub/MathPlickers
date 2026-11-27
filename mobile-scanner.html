@@ -108,7 +108,7 @@
                 <div id="roi-br" class="absolute -bottom-1 -right-1 w-6 h-6 border-b-4 border-r-4 border-sky-400 rounded-br-lg transition-colors"></div>
             </div>
             <div id="roi-status-pill" class="mt-3 bg-black/80 backdrop-blur px-3.5 py-1 rounded-full text-xs font-semibold text-slate-200 border border-white/15 transition-colors">
-                Đưa thẻ Plickers vào khung • Cạnh đáp án hướng LÊN TRÊN
+                Đưa các thẻ vào vùng camera • Giữ thẻ phẳng, đủ sáng và không che mã
             </div>
         </div>
 
@@ -119,7 +119,7 @@
             </div>
             <h2 class="text-lg font-extrabold text-white mb-1">Sẵn sàng Quét Thẻ Học Sinh</h2>
             <p class="text-xs text-slate-400 max-w-xs mb-5 leading-relaxed">
-                Hệ thống xác thực ma trận 5×5 và 4 hướng xoay <b>A - B - C - D</b> ổn định nhiều khung hình trước khi ghi nhận.
+                Đưa nhiều thẻ vào vùng camera. Hệ thống dò theo nhiều vùng ảnh, xác thực mã thẻ 5×5 và hướng A/B/C/D qua nhiều khung hình trước khi ghi nhận từng học sinh.
             </p>
             <button onclick="startMobileCamera()" class="px-6 py-3 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-extrabold text-sm shadow-lg flex items-center gap-2 transition">
                 <i class="fa-solid fa-video"></i>
@@ -265,7 +265,9 @@
             cooldownMs: 1700,                  // Chống quét lặp cùng (cardId + answer) 1.5 - 2s
             confirmedVisualHoldMs: 550,        // Giữ hiệu ứng khung xác nhận ngắn gọn trên ROI
             roiSizeRatio: 0.62,
-            procSize: 128,
+            tileRatio: 0.46,                 // Cửa sổ vuông chồng lấp để dò nhiều thẻ trong một khung hình
+            tilePositions: [0.12, 0.373, 0.627, 0.88],
+            procSize: 192,
             minContrastStd: 24,               // Loại khung hình tương phản kém / mờ
             minCellContrastMargin: 18,         // Chênh lệch tối thiểu giữa ô đen và ô trắng
             minBorderDarkRatio: 0.58           // Tỷ lệ pixel tối dọc khung viền tứ giác thẻ
@@ -282,19 +284,21 @@
         let recentPairCooldown = new Map();    // `${cardNumber}_${option}` -> lastCommitTimestamp
 
         // Trạng thái tạm thời (chỉ lưu đọc thử của chuỗi khung hình hiện tại)
-        let pendingScan = null;                // { cardNumber, option, confidence, frames, firstSeenAt, lastSeenAt }
+        let pendingScan = null;                // Giữ tương thích giao diện cũ
+        const pendingByCard = new Map();        // Xác nhận độc lập theo từng định danh thẻ
         let confirmedVisualUntil = 0;
 
         const syncChannel = ('BroadcastChannel' in window) ? new BroadcastChannel('mathplickers_sync') : null;
 
         function resetSessionState(reasonLabel = '') {
             pendingScan = null;
+            pendingByCard.clear();
             confirmedByCard.clear();
             scanHistory = [];
             recentPairCooldown.clear();
             confirmedVisualUntil = 0;
             renderConfirmedUI();
-            setRoiVisualState('idle', reasonLabel || 'Đưa thẻ Plickers vào khung • Cạnh đáp án hướng LÊN TRÊN');
+            setRoiVisualState('idle', reasonLabel || 'Đưa các thẻ vào vùng camera • Giữ thẻ phẳng, đủ sáng và không che mã');
         }
 
         function resetPendingOnly(statusText = null) {
@@ -464,58 +468,77 @@
         /**
          * 4. LỚP TẠM THỜI (PENDING) & GHI NHẬN CHÍNH THỨC (COMMITSCAN)
          */
-        function evaluatePendingCandidate(candidate, now) {
-            if (!candidate || !VALID_OPTIONS.has(candidate.option) || candidate.confidence < 0.35) {
-                resetPendingOnly();
-                return;
+        function evaluatePendingCandidates(candidates, now) {
+            const seen = new Map();
+            for (const candidate of candidates || []) {
+                if (!candidate || !VALID_OPTIONS.has(candidate.option) || candidate.confidence < 0.35) continue;
+                // Chỉ chấp nhận mã thẻ đã được giáo viên cấp trong lớp hiện hành.
+                if (hostStudents.length && !hostStudents.some(st => Number(st.cardNumber) === Number(candidate.cardNumber))) continue;
+                const old = seen.get(candidate.cardNumber);
+                if (!old || candidate.confidence > old.confidence) seen.set(candidate.cardNumber, candidate);
             }
 
-            const sameAsPending =
-                pendingScan &&
-                pendingScan.cardNumber === candidate.cardNumber &&
-                pendingScan.option === candidate.option;
-
-            if (sameAsPending) {
-                pendingScan.frames += 1;
-                pendingScan.lastSeenAt = now;
-                pendingScan.confidence = Math.max(pendingScan.confidence, candidate.confidence);
-            } else {
-                pendingScan = {
-                    cardNumber: candidate.cardNumber,
-                    option: candidate.option,
-                    confidence: candidate.confidence,
-                    frames: 1,
-                    firstSeenAt: now,
-                    lastSeenAt: now
-                };
-            }
-
-            const elapsedMs = pendingScan.lastSeenAt - pendingScan.firstSeenAt;
-            if (now > confirmedVisualUntil) {
-                setRoiVisualState(
-                    'tracking',
-                    `Đang giữ thẻ #${pendingScan.cardNumber} (${pendingScan.option}) • ${pendingScan.frames}/${SCAN_CONFIG.requiredStableFrames} khung`
-                );
-            }
-
-            if (
-                pendingScan.frames >= SCAN_CONFIG.requiredStableFrames &&
-                elapsedMs >= SCAN_CONFIG.requiredStableMs
-            ) {
-                const pairKey = `${pendingScan.cardNumber}_${pendingScan.option}`;
-                const lastPairCommit = recentPairCooldown.get(pairKey) || 0;
-
-                if (now - lastPairCommit < SCAN_CONFIG.cooldownMs) {
-                    return;
+            const accepted = [];
+            for (const [cardNumber, candidate] of seen) {
+                const prev = pendingByCard.get(cardNumber);
+                const same = prev && prev.option === candidate.option && now - prev.lastSeenAt <= 550;
+                const state = same
+                    ? { ...prev, frames: prev.frames + 1, lastSeenAt: now, confidence: Math.max(prev.confidence, candidate.confidence) }
+                    : { cardNumber, option: candidate.option, confidence: candidate.confidence, frames: 1, firstSeenAt: now, lastSeenAt: now };
+                pendingByCard.set(cardNumber, state);
+                const elapsed = state.lastSeenAt - state.firstSeenAt;
+                const key = `${cardNumber}_${candidate.option}`;
+                const lastCommit = recentPairCooldown.get(key) || 0;
+                if (state.frames >= SCAN_CONFIG.requiredStableFrames && elapsed >= SCAN_CONFIG.requiredStableMs && now - lastCommit >= SCAN_CONFIG.cooldownMs) {
+                    accepted.push({ cardNumber, option: candidate.option });
+                    recentPairCooldown.set(key, now);
+                    pendingByCard.delete(cardNumber);
                 }
-
-                const acceptedCard = pendingScan.cardNumber;
-                const acceptedOption = pendingScan.option;
-                pendingScan = null;
-                recentPairCooldown.set(pairKey, now);
-
-                commitScan(acceptedCard, acceptedOption, { source: 'camera', timestamp: now });
             }
+
+            // Bỏ các mẫu đã mất khỏi khung hình; không ghép nhầm hai học sinh ở các thời điểm khác nhau.
+            for (const [cardNumber, state] of pendingByCard) {
+                if (now - state.lastSeenAt > 550) pendingByCard.delete(cardNumber);
+            }
+
+            if (accepted.length) commitScanBatch(accepted, { source: 'camera', timestamp: now });
+            else if (pendingByCard.size && now > confirmedVisualUntil) {
+                const states = [...pendingByCard.values()].slice(0, 3);
+                setRoiVisualState('tracking', `Đang xác thực ${pendingByCard.size} thẻ: ${states.map(x => `#${x.cardNumber} ${x.frames}/${SCAN_CONFIG.requiredStableFrames}`).join(' • ')}`);
+            }
+        }
+
+        function commitScanBatch(scans, meta = {}) {
+            const now = meta.timestamp || Date.now();
+            const valid = [];
+            for (const item of scans) {
+                const cardNumber = Number(item.cardNumber);
+                const option = item.option;
+                if (!Number.isInteger(cardNumber) || cardNumber < 1 || cardNumber > 60 || !VALID_OPTIONS.has(option)) continue;
+                const previous = confirmedByCard.get(cardNumber);
+                const changed = !previous || previous.option !== option;
+                confirmedByCard.set(cardNumber, { cardNumber, option, timestamp: now });
+                scanHistory.unshift({ cardNumber, option, actionType: !previous ? 'new' : changed ? 'updated' : 'reconfirmed', timestamp: now });
+                if (changed) valid.push({ cardNumber, option });
+            }
+            if (!valid.length) return;
+            scanHistory = scanHistory.slice(0, 50);
+            renderConfirmedUI();
+            const payload = { type: 'PLICKERS_SCAN_BATCH', scans: valid, questionKey: currentQuestionKey, timestamp: now };
+            if (hostConn && hostConn.open) { try { hostConn.send(payload); } catch (e) {} }
+            if (syncChannel) { try { syncChannel.postMessage(payload); } catch (e) {} }
+            try { localStorage.setItem('mathplickers_remote_scan', JSON.stringify(payload)); } catch (e) {}
+            playBeepFeedback(880);
+            if (navigator.vibrate) { try { navigator.vibrate(45); } catch (e) {} }
+            confirmedVisualUntil = now + SCAN_CONFIG.confirmedVisualHoldMs;
+            const names = valid.slice(0, 3).map(x => {
+                const student = hostStudents.find(st => Number(st.cardNumber) === x.cardNumber);
+                return student ? student.name : `#${x.cardNumber}`;
+            });
+            setRoiVisualState('confirmed', `Đã ghi nhận ${valid.length} thẻ: ${names.join(', ')}${valid.length > 3 ? '…' : ''}`);
+            const first = valid[0];
+            const student = hostStudents.find(st => Number(st.cardNumber) === first.cardNumber);
+            showScanBanner(first.cardNumber, valid.length > 1 ? `${valid.length} học sinh đã quét` : (student ? student.name : `Học sinh thẻ #${first.cardNumber}`), first.option, `Đã gửi ${valid.length} kết quả về máy tính`);
         }
 
         function commitScan(cardNumber, option, meta = {}) {
@@ -656,14 +679,18 @@
             resetSessionState('Đang khởi động camera...');
 
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    },
-                    audio: false
-                });
+                if (!navigator.mediaDevices?.getUserMedia) throw new DOMException('Trình duyệt không hỗ trợ camera hoặc trang chưa chạy HTTPS.', 'NotSupportedError');
+                let stream;
+                const preferred = {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1920 }, height: { ideal: 1080 },
+                    frameRate: { ideal: 24, max: 30 }
+                };
+                try { stream = await navigator.mediaDevices.getUserMedia({ video: preferred, audio: false }); }
+                catch (firstError) {
+                    // Một số điện thoại không nhận tổ hợp độ phân giải/facingMode; thử cấu hình tối giản.
+                    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+                }
 
                 mediaStream = stream;
                 video.srcObject = stream;
@@ -673,6 +700,9 @@
                     else video.addEventListener('loadeddata', resolve, { once: true });
                 });
                 cameraTrack = stream.getVideoTracks()[0] || null;
+                if (cameraTrack?.applyConstraints) {
+                    try { await cameraTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }, { exposureMode: 'continuous' }, { whiteBalanceMode: 'continuous' }] }); } catch (e) {}
+                }
 
                 if (cameraTrack && cameraTrack.getCapabilities) {
                     const caps = cameraTrack.getCapabilities();
@@ -689,7 +719,9 @@
                 scheduleNextScanTick();
             } catch (err) {
                 scanLoopActive = false;
-                const reason = err && err.name === 'NotAllowedError' ? 'Bạn chưa cấp quyền camera.' : err && err.name === 'NotFoundError' ? 'Không tìm thấy camera trên thiết bị.' : err && err.name === 'NotReadableError' ? 'Camera đang được ứng dụng khác sử dụng.' : 'Trình duyệt không mở được camera.';
+                if (mediaStream) { mediaStream.getTracks().forEach(track => { try { track.stop(); } catch (e) {} }); mediaStream = null; }
+                video.srcObject = null;
+                const reason = err && err.name === 'NotAllowedError' ? 'Bạn chưa cấp quyền camera.' : err && err.name === 'NotFoundError' ? 'Không tìm thấy camera trên thiết bị.' : err && err.name === 'NotReadableError' ? 'Camera đang được ứng dụng khác sử dụng.' : err && err.name === 'NotSupportedError' ? 'Trình duyệt không hỗ trợ camera hoặc trang chưa chạy HTTPS.' : err && err.name === 'OverconstrainedError' ? 'Camera không đáp ứng cấu hình yêu cầu.' : 'Trình duyệt không mở được camera.';
                 const pill = document.getElementById('roi-status-pill');
                 if (pill) pill.textContent = `${reason} Hãy dùng HTTPS, cấp quyền camera rồi thử lại.`;
                 document.getElementById('camera-start-overlay').classList.remove('hidden');
@@ -729,6 +761,7 @@
             document.getElementById('btn-torch').classList.add('hidden');
             document.getElementById('btn-stop-cam').classList.add('hidden');
             resetSessionState();
+            pendingByCard.clear();
 
             if (showStartOverlay) {
                 document.getElementById('camera-start-overlay').classList.remove('hidden');
@@ -775,138 +808,66 @@
         function runScanStep() {
             const video = document.getElementById('mobile-video');
             const now = Date.now();
-
-            if (!isVideoFrameReady(video)) {
-                resetPendingOnly();
-                return;
+            if (!isVideoFrameReady(video)) return;
+            const candidates = decodePlickersCandidatesFromFrame(video);
+            evaluatePendingCandidates(candidates, now);
+            if (!candidates.length && !pendingByCard.size && now > confirmedVisualUntil) {
+                setRoiVisualState('idle', 'Đưa 1 hoặc nhiều thẻ vào vùng camera • Giữ thẻ phẳng, đủ sáng');
             }
-
-            const candidate = decodePlickersCandidateFromROI(video);
-            if (!candidate) {
-                resetPendingOnly(
-                    now > confirmedVisualUntil
-                        ? 'Đưa thẻ Plickers vào khung • Cạnh đáp án hướng LÊN TRÊN'
-                        : null
-                );
-                return;
-            }
-
-            evaluatePendingCandidate(candidate, now);
         }
 
-        function computeFrameQualityStats(gray, len) {
-            let sum = 0;
-            let darkPixels = 0;
-            let brightPixels = 0;
-
-            for (let i = 0; i < len; i++) {
-                const g = gray[i];
-                sum += g;
-                if (g < 45) darkPixels++;
-                else if (g > 215) brightPixels++;
+        // Chia toàn khung hình thành các cửa sổ vuông chồng lấp. Mỗi cửa sổ giải mã độc lập,
+        // sau đó hợp nhất theo cardNumber để một thẻ xuất hiện ở hai cửa sổ cũng chỉ được tính một lần.
+        function decodePlickersCandidatesFromFrame(video) {
+            const vw = video.videoWidth, vh = video.videoHeight;
+            const side = Math.floor(Math.min(vw, vh) * SCAN_CONFIG.tileRatio);
+            const found = new Map();
+            for (const cyRatio of SCAN_CONFIG.tilePositions) {
+                for (const cxRatio of SCAN_CONFIG.tilePositions) {
+                    const sx = Math.max(0, Math.min(vw - side, Math.floor(vw * cxRatio - side / 2)));
+                    const sy = Math.max(0, Math.min(vh - side, Math.floor(vh * cyRatio - side / 2)));
+                    const candidate = decodePlickersCandidateFromCrop(video, sx, sy, side);
+                    if (candidate) {
+                        const prev = found.get(candidate.cardNumber);
+                        if (!prev || candidate.confidence > prev.confidence) found.set(candidate.cardNumber, candidate);
+                    }
+                }
             }
-
-            const mean = sum / len;
-            let sqDiffSum = 0;
-            for (let i = 0; i < len; i++) {
-                const d = gray[i] - mean;
-                sqDiffSum += d * d;
-            }
-            const std = Math.sqrt(sqDiffSum / len);
-            const darkRatio = darkPixels / len;
-            const brightRatio = brightPixels / len;
-
-            // Lọc khung hình quá tối, quá chói sáng hoặc độ tương phản thấp/mờ
-            const isAcceptable =
-                mean >= 42 &&
-                mean <= 222 &&
-                std >= SCAN_CONFIG.minContrastStd &&
-                darkRatio <= 0.72 &&
-                brightRatio <= 0.75;
-
-            return { mean, std, isAcceptable };
+            return [...found.values()];
         }
 
-        function decodePlickersCandidateFromROI(video) {
+        function decodePlickersCandidateFromCrop(video, sx, sy, cropSize) {
             const procCanvas = document.getElementById('proc-canvas');
             const ctx = procCanvas.getContext('2d', { willReadFrequently: true });
             if (!ctx) return null;
-
-            const vw = video.videoWidth;
-            const vh = video.videoHeight;
-            const roiSize = Math.floor(Math.min(vw, vh) * SCAN_CONFIG.roiSizeRatio);
-            const sx = Math.floor((vw - roiSize) / 2);
-            const sy = Math.floor((vh - roiSize) / 2);
-
             const S = SCAN_CONFIG.procSize;
-            procCanvas.width = S;
-            procCanvas.height = S;
-            ctx.drawImage(video, sx, sy, roiSize, roiSize, 0, 0, S, S);
-
-            let imgData = null;
+            procCanvas.width = S; procCanvas.height = S;
+            ctx.drawImage(video, sx, sy, cropSize, cropSize, 0, 0, S, S);
             let gray = null;
-
             try {
-                imgData = ctx.getImageData(0, 0, S, S);
-                const px = imgData.data;
+                const px = ctx.getImageData(0, 0, S, S).data;
                 gray = new Uint8Array(S * S);
-
-                for (let i = 0; i < S * S; i++) {
-                    gray[i] = (px[i * 4] * 77 + px[i * 4 + 1] * 150 + px[i * 4 + 2] * 29) >> 8;
-                }
-
+                for (let i = 0; i < S * S; i++) gray[i] = (px[i * 4] * 77 + px[i * 4 + 1] * 150 + px[i * 4 + 2] * 29) >> 8;
                 const quality = computeFrameQualityStats(gray, S * S);
-                if (!quality.isAcceptable) {
-                    return null;
-                }
-
-                // Tìm các vùng có viền tối dạng khối vuông/tứ giác bên trong ROI
+                if (!quality.isAcceptable) return null;
+                // Ngưỡng theo vùng ảnh, hạn chế phụ thuộc vào độ sáng tổng thể của toàn camera.
                 const threshold = Math.max(35, Math.min(210, quality.mean * 0.82));
                 const box = locateCardBorderBox(gray, S, threshold);
-                if (!box) {
-                    return null;
-                }
-
-                // Xác thực tỷ lệ cạnh & sự hiện diện của khung viền 4 cạnh xung quanh ma trận
-                const w = box.maxX - box.minX;
-                const h = box.maxY - box.minY;
-                if (w < 38 || h < 38 || w > S * 0.92 || h > S * 0.92) {
-                    return null;
-                }
+                if (!box) return null;
+                const w = box.maxX - box.minX, h = box.maxY - box.minY;
+                if (w < 44 || h < 44 || w > S * 0.94 || h > S * 0.94) return null;
                 const aspect = w / h;
-                if (aspect < 0.78 || aspect > 1.28) {
-                    return null;
-                }
-
-                if (!hasValidOuterBorder(gray, S, box, threshold)) {
-                    return null;
-                }
-
-                // Lấy mẫu ma trận 5x5 bên trong khung thẻ + kiểm tra biên độ tương phản đen/trắng
+                if (aspect < 0.78 || aspect > 1.28 || !hasValidOuterBorder(gray, S, box, threshold)) return null;
                 const matrixSample = sample5x5Matrix(gray, S, box, threshold);
-                if (!matrixSample || matrixSample.margin < SCAN_CONFIG.minCellContrastMargin) {
-                    return null;
-                }
-
-                const signature = matrixSample.bits.join('');
-                const match = CARD_LOOKUP.get(signature);
-                if (!match || !VALID_OPTIONS.has(match.option)) {
-                    return null;
-                }
-
-                // Xác thực hướng xoay rõ ràng qua độ rõ nét của dải định hướng sát cạnh trên/các cạnh
+                if (!matrixSample || matrixSample.margin < SCAN_CONFIG.minCellContrastMargin) return null;
+                const match = CARD_LOOKUP.get(matrixSample.bits.join(''));
+                if (!match || !VALID_OPTIONS.has(match.option)) return null;
                 const orientationScore = evaluateOrientationClarity(gray, S, box, match.option, threshold);
-                if (orientationScore < 0.55) {
-                    return null;
-                }
-
-                return {
-                    cardNumber: match.cardNumber,
-                    option: match.option,
-                    confidence: Math.min(1, matrixSample.margin / 80)
-                };
+                if (orientationScore < 0.48) return null;
+                return { cardNumber: match.cardNumber, option: match.option, confidence: Math.min(1, matrixSample.margin / 80) * orientationScore };
+            } catch (error) {
+                return null;
             } finally {
-                imgData = null;
                 gray = null;
                 ctx.clearRect(0, 0, S, S);
             }

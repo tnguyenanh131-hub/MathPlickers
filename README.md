@@ -41,6 +41,7 @@ Nên nhập công thức bằng LaTeX có dấu phân cách, ví dụ `\\frac{a}
 
 - Bộ quét nhận diện bộ thẻ ma trận 5×5 do chính ứng dụng tạo (dải số thẻ 1–60) và bốn hướng A/B/C/D. Đây **không phải cam kết tương thích với bộ thẻ Plickers chính thức**.
 - Cần in thẻ đúng từ mục **Lớp học & In thẻ** trong ứng dụng; không tự vẽ lại, không bóp méo tỷ lệ. Khi quét, đặt thẻ trong khung, đủ sáng, tránh lóa và giữ ổn định.
+- Camera dò 9 cửa sổ ảnh chồng lấp để nhận nhiều thẻ trong cùng khung hình; xác nhận ổn định độc lập theo từng số thẻ, gộp kết quả trùng vùng ảnh và gửi theo lô về máy tính. Danh tính học sinh được ánh xạ từ số thẻ duy nhất trong danh sách lớp giáo viên.
 - Phần mềm yêu cầu nhiều khung hình ổn định trước khi ghi nhận, có lọc độ tương phản và chống ghi nhận lặp. Đây là xử lý ảnh trên trình duyệt, không phải hệ thống thị giác máy tính đã được chứng nhận. Cần kiểm thử thực tế trên thiết bị, camera, giấy in và ánh sáng của lớp trước khi dùng để chấm điểm chính thức.
 - Điện thoại cần HTTPS, quyền camera và kết nối Internet để thiết lập PeerJS. Hai thiết bị khác nhau không dùng chung `localStorage`; dữ liệu lớp/câu hỏi được lưu trong trình duyệt máy tính giáo viên.
 
