@@ -1018,13 +1018,52 @@
                 .replace(/\$log_/g, '$\\log_');
         }
 
+        function normalizeLatexDelimiters(str) {
+            if (typeof str !== 'string') return str;
+            let s = sanitizeBrokenLatex(str);
+            // Chuyển \[ ... \] hoặc \( ... \) chuẩn hóa và đảm bảo công thức LaTeX trần được bọc $...$ nếu AI quên
+            s = s.replace(/\\\((.*?)\\\)/gs, '$$$1$$');
+            // Thay thế placeholder ảnh còn sót nếu có
+            return s;
+        }
+
+        function replaceMediaPlaceholders(str, mediaImages) {
+            if (typeof str !== 'string') return '';
+            let out = str;
+            mediaImages.forEach((img, idx) => {
+                out = out.replaceAll(`IMG_INDEX_${idx}`, img.dataUrl);
+            });
+            return out;
+        }
+
+        function renderRichMathOrSafeMedia(raw) {
+            const str = String(raw ?? '');
+            if (/<(img|table|svg|br|b|strong|i|em|sup|sub|span|div)\b/i.test(str)) {
+                const doc = new DOMParser().parseFromString(`<div>${str}</div>`, 'text/html');
+                doc.querySelectorAll('script,iframe,object,embed,link,style,meta').forEach(n => n.remove());
+                doc.querySelectorAll('*').forEach(el => {
+                    [...el.attributes].forEach(attr => {
+                        const name = attr.name.toLowerCase();
+                        const val = attr.value.trim();
+                        if (name.startsWith('on')) {
+                            el.removeAttribute(attr.name);
+                        } else if ((name === 'src' || name === 'href') && !val.startsWith('data:image/') && !val.startsWith('https://') && !val.startsWith('#')) {
+                            el.removeAttribute(attr.name);
+                        }
+                    });
+                });
+                return doc.body.firstElementChild ? doc.body.firstElementChild.innerHTML : escapeHTML(str);
+            }
+            return escapeHTML(str);
+        }
+
         function sanitizeQuestionObject(q) {
             if (!q) return q;
-            q.text = sanitizeBrokenLatex(q.text);
-            q.explanation = sanitizeBrokenLatex(q.explanation);
+            q.text = normalizeLatexDelimiters(q.text);
+            q.explanation = normalizeLatexDelimiters(q.explanation);
             if (q.options) {
                 ['A', 'B', 'C', 'D'].forEach(k => {
-                    q.options[k] = sanitizeBrokenLatex(q.options[k]);
+                    q.options[k] = normalizeLatexDelimiters(q.options[k]);
                 });
             }
             return q;
@@ -1434,7 +1473,7 @@
             document.getElementById('live-total-students').textContent = students.length;
 
             const qTextEl = document.getElementById('live-question-text');
-            qTextEl.textContent = q.text;
+            qTextEl.innerHTML = renderRichMathOrSafeMedia(q.text);
 
             const visualContainer = document.getElementById('live-visual-container');
             const graphCanvas = document.getElementById('live-graph-canvas');
@@ -1480,12 +1519,12 @@
             }
 
             ['A', 'B', 'C', 'D'].forEach(opt => {
-                document.getElementById(`live-opt-${opt}`).textContent = q.options[opt] || '';
+                document.getElementById(`live-opt-${opt}`).innerHTML = renderRichMathOrSafeMedia(q.options[opt] || '');
                 const card = document.getElementById(`opt-card-${opt}`);
                 card.className = 'option-box border-2 border-slate-200 rounded-2xl p-4 flex items-center gap-4 bg-white transition-all';
             });
 
-            document.getElementById('live-explanation-text').textContent = q.explanation || 'Chưa có lời giải chi tiết cho câu hỏi này.';
+            document.getElementById('live-explanation-text').innerHTML = renderRichMathOrSafeMedia(q.explanation || 'Chưa có lời giải chi tiết cho câu hỏi này.');
 
             const chartPanel = document.getElementById('live-chart-panel');
             const expBox = document.getElementById('live-explanation-box');
@@ -1800,14 +1839,14 @@
                                 </div>
                             </div>
 
-                            <div class="text-slate-900 font-medium text-sm sm:text-base mb-3 leading-relaxed">${escapeHTML(q.text)}</div>
+                            <div class="text-slate-900 font-medium text-sm sm:text-base mb-3 leading-relaxed">${renderRichMathOrSafeMedia(q.text)}</div>
 
                             <div class="grid grid-cols-2 gap-2 text-xs sm:text-sm">
                                 ${['A', 'B', 'C', 'D'].map(opt => {
                                     const isCorrect = q.correct === opt;
                                     return `
                                         <div class="p-2 rounded-xl border ${isCorrect ? 'bg-emerald-50 border-emerald-400 font-bold text-emerald-950' : 'bg-slate-50 border-slate-200 text-slate-700'}">
-                                            <span class="font-extrabold mr-1">${opt}.</span> ${escapeHTML(q.options[opt])}
+                                            <span class="font-extrabold mr-1">${opt}.</span> ${renderRichMathOrSafeMedia(q.options[opt])}
                                         </div>
                                     `;
                                 }).join('')}
@@ -1935,12 +1974,12 @@
             }
 
             previewBox.innerHTML = `
-                <div class="font-semibold mb-2">${escapeHTML(qText)}</div>
+                <div class="font-semibold mb-2">${renderRichMathOrSafeMedia(qText)}</div>
                 <div class="grid grid-cols-2 gap-2 text-sm text-slate-700">
-                    <div><b>A.</b> ${escapeHTML(optA)}</div>
-                    <div><b>B.</b> ${escapeHTML(optB)}</div>
-                    <div><b>C.</b> ${escapeHTML(optC)}</div>
-                    <div><b>D.</b> ${escapeHTML(optD)}</div>
+                    <div><b>A.</b> ${renderRichMathOrSafeMedia(optA)}</div>
+                    <div><b>B.</b> ${renderRichMathOrSafeMedia(optB)}</div>
+                    <div><b>C.</b> ${renderRichMathOrSafeMedia(optC)}</div>
+                    <div><b>D.</b> ${renderRichMathOrSafeMedia(optD)}</div>
                 </div>
             `;
             renderMathInElementSafe(previewBox);
@@ -2827,6 +2866,8 @@
 
             const statePayload = {
                 type: 'HOST_STATE',
+                questionKey: currentQ ? `${activeClassId}_${currentQ.id}` : `Q_${currentLiveIndex + 1}`,
+                questionIndex: currentLiveIndex + 1,
                 className: getActiveClass()?.name || 'Lớp học',
                 questionLabel: `Câu ${currentLiveIndex + 1}/${questions.length}`,
                 questionText: currentQ ? currentQ.text : '',
@@ -2987,16 +3028,17 @@
                 const systemPrompt = `Bạn là chuyên gia số hóa đề thi Toán học sang chuẩn JSON cho phần mềm MathPlickers.
 Nhiệm vụ: Phân tích XML của file Word (.docx) và các hình ảnh đính kèm để trích xuất toàn bộ câu hỏi trắc nghiệm 4 lựa chọn (A, B, C, D).
 Yêu cầu bắt buộc:
-1. Toàn bộ công thức toán học (từ <m:oMath> hoặc ký hiệu toán) phải chuyển sang chuẩn LaTeX đặt trong cặp dấu $ ... $ (inline) hoặc $$ ... $$ (display).
-2. Nếu câu hỏi có Bảng biểu hoặc Bảng biến thiên (từ <w:tbl> hoặc hình ảnh), hãy dựng lại thành mã HTML Table hoặc SVG chuẩn xác vào trường "svgCode" và đặt "visualType": "svg".
-3. Nếu câu hỏi có Hình vẽ hình học hoặc Đồ thị từ ảnh đính kèm, hãy dựng thành mã <svg viewBox="0 0 300 220">...</svg> rõ nét (hoặc nhúng thẻ <img src="IMG_INDEX_0" class="max-h-52 mx-auto"/> tương ứng thứ tự ảnh) vào "svgCode" với "visualType": "svg".
-4. Trả về DUY NHẤT một mảng JSON hợp lệ (không bọc markdown), mỗi phần tử có cấu trúc:
+1. Toàn bộ công thức toán học (từ <m:oMath>, MathType, WMF/EMF hoặc ảnh công thức trong đề và đáp án A, B, C, D) PHẢI được nhận diện và chuyển thành văn bản LaTeX chuẩn đặt trong cặp dấu $ ... $ (ví dụ: $y = x^3 - 3x + 1$, $\frac{a}{b}$, $\sqrt{3}$). TUYỆT ĐỐI KHÔNG chèn thẻ <img> vào text hay options nếu đó là công thức toán học!
+2. Chỉ sử dụng <img src="IMG_INDEX_0" class="max-h-52 mx-auto"/> trong trường "svgCode" (với "visualType": "svg") khi ảnh đó là hình vẽ hình học, đồ thị hàm số hoặc bảng biến thiên minh họa cho đề bài.
+3. Nếu câu hỏi có Bảng biểu hoặc Bảng biến thiên (từ <w:tbl> hoặc hình ảnh), dựng lại thành mã HTML Table hoặc SVG chuẩn xác vào trường "svgCode" và đặt "visualType": "svg".
+4. Trong JSON, mọi dấu gạch chéo ngược LaTeX phải được escape đúng chuẩn JSON (ví dụ: "\\frac{1}{2}", "\\sqrt{3}", "\\infty").
+5. Trả về DUY NHẤT một mảng JSON hợp lệ (không bọc markdown), mỗi phần tử có cấu trúc:
 {
   "topic": "Giải tích | Đại số | Hình học phẳng | Hình học không gian",
-  "text": "Nội dung câu hỏi đã chuẩn hóa LaTeX",
-  "options": { "A": "...", "B": "...", "C": "...", "D": "..." },
+  "text": "Nội dung câu hỏi đã chuẩn hóa LaTeX $...$",
+  "options": { "A": "$...$", "B": "$...$", "C": "$...$", "D": "$...$" },
   "correct": "A",
-  "explanation": "Lời giải chi tiết (nếu có trong đề)",
+  "explanation": "Lời giải chi tiết đã chuẩn hóa LaTeX (nếu có trong đề)",
   "visualType": "none | svg",
   "svgCode": "Mã SVG hoặc bảng biến thiên HTML nếu có",
   "visualCaption": "Chú thích hình/bảng"
@@ -3034,23 +3076,26 @@ Yêu cầu bắt buộc:
                 }
 
                 parsedQuestions.forEach((item, idx) => {
-                    let svgHtml = item.svgCode || '';
-                    mediaImages.forEach((img, imgIdx) => {
-                        svgHtml = svgHtml.replaceAll(`IMG_INDEX_${imgIdx}`, img.dataUrl);
-                    });
+                    const qText = replaceMediaPlaceholders(item.text || '', mediaImages);
+                    const optA = replaceMediaPlaceholders(item.options?.A || '', mediaImages);
+                    const optB = replaceMediaPlaceholders(item.options?.B || '', mediaImages);
+                    const optC = replaceMediaPlaceholders(item.options?.C || '', mediaImages);
+                    const optD = replaceMediaPlaceholders(item.options?.D || '', mediaImages);
+                    const expText = replaceMediaPlaceholders(item.explanation || '', mediaImages);
+                    const svgHtml = replaceMediaPlaceholders(item.svgCode || '', mediaImages);
 
                     questions.push(sanitizeQuestionObject({
                         id: `q_docx_${Date.now()}_${idx}`,
                         topic: item.topic || 'Giải tích',
-                        text: item.text || '',
+                        text: qText,
                         options: {
-                            A: item.options?.A || '',
-                            B: item.options?.B || '',
-                            C: item.options?.C || '',
-                            D: item.options?.D || ''
+                            A: optA,
+                            B: optB,
+                            C: optC,
+                            D: optD
                         },
                         correct: ['A', 'B', 'C', 'D'].includes(item.correct) ? item.correct : 'A',
-                        explanation: item.explanation || '',
+                        explanation: expText,
                         visualType: svgHtml ? 'svg' : 'none',
                         graphExpr: '',
                         svgCode: svgHtml,

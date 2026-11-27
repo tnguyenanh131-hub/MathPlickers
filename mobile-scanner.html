@@ -836,6 +836,27 @@
             return [...found.values()];
         }
 
+        function computeFrameQualityStats(gray, totalPixels) {
+            if (!gray || totalPixels <= 0) {
+                return { mean: 0, std: 0, isAcceptable: false };
+            }
+            let sum = 0;
+            for (let i = 0; i < totalPixels; i++) {
+                sum += gray[i];
+            }
+            const mean = sum / totalPixels;
+
+            let sqDiffSum = 0;
+            for (let i = 0; i < totalPixels; i++) {
+                const diff = gray[i] - mean;
+                sqDiffSum += diff * diff;
+            }
+            const std = Math.sqrt(sqDiffSum / totalPixels);
+
+            const isAcceptable = mean >= 20 && mean <= 245 && std >= SCAN_CONFIG.minContrastStd;
+            return { mean, std, isAcceptable };
+        }
+
         function decodePlickersCandidateFromCrop(video, sx, sy, cropSize) {
             const procCanvas = document.getElementById('proc-canvas');
             const ctx = procCanvas.getContext('2d', { willReadFrequently: true });
